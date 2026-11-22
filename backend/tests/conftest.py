@@ -31,11 +31,14 @@ os.environ["MODEL_PROVIDER"] = "mock"
 os.environ["MODEL_API_KEY"] = ""
 os.environ["LOG_LEVEL"] = "WARNING"
 
+from uuid import uuid4  # noqa: E402
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.db.session import Base, engine  # noqa: E402
+from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services.api_keys import ApiKeyService  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -52,6 +55,33 @@ def clean_tables(client):
         for table in reversed(Base.metadata.sorted_tables):
             connection.execute(table.delete())
     yield
+
+
+def _create_key(role: str) -> str:
+    with SessionLocal() as db:
+        _, raw = ApiKeyService(db).create(name=f"test-{role}-{uuid4().hex[:8]}", role=role)
+    return raw
+
+
+@pytest.fixture(autouse=True)
+def admin_auth(client, clean_tables):
+    """默认让共用 client 以 admin 身份请求。
+
+    认证默认开启，所有既有用例都必须带凭据；每个用例发一把新密钥，
+    因为 clean_tables 会清空 api_keys 表。
+    """
+    client.headers["Authorization"] = f"Bearer {_create_key('admin')}"
+    yield
+
+
+@pytest.fixture
+def make_key():
+    """按需创建指定角色的密钥（用于 RBAC 用例）。"""
+
+    def _factory(role: str) -> str:
+        return _create_key(role)
+
+    return _factory
 
 
 @pytest.fixture

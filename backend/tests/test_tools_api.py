@@ -60,7 +60,8 @@ def test_tool_registration_is_audited(client, echo_tool):
     logs = client.get("/api/v1/audit-logs", params={"action": "tool.register"}).json()
     assert logs["total"] == 1
     assert logs["items"][0]["resource"] == "tool:echo"
-    assert logs["items"][0]["actor"] == "system"
+    # 审计主体是发起操作的那把密钥
+    assert logs["items"][0]["actor"].startswith("key:")
 
 
 # ---------------------------------------------------------------------------

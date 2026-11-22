@@ -1,5 +1,29 @@
 import type {Agent,Conversation,Message,Page,SendMessageResponse} from "./types";
+
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
+const KEY_STORAGE = "agentPlatformApiKey";
+
+/** 带 HTTP 状态码的错误，便于区分 401（需要重新输入密钥）与其他失败。 */
+export class ApiError extends Error {
+ readonly status:number;
+ constructor(message:string,status:number){
+  super(message);
+  this.name="ApiError";
+  this.status=status;
+ }
+}
+
+/**
+ * API Key 只保存在浏览器本地，不进构建产物。
+ * 生产环境若要更强的方案，应改成后端签发的短期会话令牌。
+ */
+export const keyStore={
+ get():string{return localStorage.getItem(KEY_STORAGE) ?? "";},
+ set(value:string):void{
+  const trimmed=value.trim();
+  if(trimmed) localStorage.setItem(KEY_STORAGE,trimmed); else localStorage.removeItem(KEY_STORAGE);
+ },
+};
 
 /** 把后端的统一错误信封翻译成可展示的文案，附上 request_id 便于排查。 */
 async function describeError(res:Response):Promise<string>{
@@ -13,8 +37,16 @@ async function describeError(res:Response):Promise<string>{
 }
 
 async function request<T>(path:string, init?:RequestInit):Promise<T>{
- const res = await fetch(`${BASE}${path}`,{...init,headers:{"Content-Type":"application/json",...init?.headers}});
- if(!res.ok) throw new Error(await describeError(res));
+ const key = keyStore.get();
+ const res = await fetch(`${BASE}${path}`,{
+  ...init,
+  headers:{
+   "Content-Type":"application/json",
+   ...(key ? {Authorization:`Bearer ${key}`} : {}),
+   ...init?.headers,
+  },
+ });
+ if(!res.ok) throw new ApiError(await describeError(res), res.status);
  if(res.status===204) return undefined as T;
  return res.json() as Promise<T>;
 }
@@ -25,5 +57,5 @@ export const api={
  conversations:(id:string)=>request<Page<Conversation>>(`/agents/${id}/conversations`),
  createConversation:(id:string)=>request<Conversation>(`/agents/${id}/conversations`,{method:"POST",body:JSON.stringify({title:"New conversation"})}),
  messages:(id:string)=>request<Page<Message>>(`/conversations/${id}/messages`),
- sendMessage:(id:string,content:string)=>request<SendMessageResponse>(`/conversations/${id}/messages`,{method:"POST",body:JSON.stringify({content})})
+ sendMessage:(id:string,content:string)=>request<SendMessageResponse>(`/conversations/${id}/messages`,{method:"POST",body:JSON.stringify({content})}),
 };

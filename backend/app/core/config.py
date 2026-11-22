@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = 90.0
     # 一次 Agent 运行内允许的最大工具调用轮次，防止无限循环。
     max_tool_iterations: int = 4
+    # 认证开关。默认开启；只有本地开发才应该关掉（关掉等于匿名可写）。
+    auth_enabled: bool = True
+    # 首次启动时用于引导管理员密钥；留空则自动生成并在日志中打印一次。
+    bootstrap_admin_api_key: str = ""
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

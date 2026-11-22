@@ -1,0 +1,28 @@
+/* API Key 准入界面所需的最小补充样式，叠加在 style.css 之上。 */
+
+.welcome form{display:flex;flex-direction:column;gap:8px;max-width:340px;margin:0 auto}
+
+.welcome code{font-size:11px;color:#a9b8ce}
+
+.key-input{
+ padding:10px 12px;
+ border-radius:8px;
+ border:1px solid #31496d;
+ background:#0d1522;
+ color:#e7edf7;
+ font-size:12px;
+ text-align:center;
+}
+
+.key-input:focus{outline:none;border-color:#6689f7}
+
+.link{
+ background:none;
+ border:0;
+ color:#8290a5;
+ font-size:11px;
+ cursor:pointer;
+ padding:0;
+}
+
+.link:hover{color:#dce5f3}

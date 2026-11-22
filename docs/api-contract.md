@@ -4,6 +4,25 @@ Base URL：`/api/v1`
 
 ## 通用约定
 
+### 认证
+
+除 `/health`、`/docs`、`/openapi.json` 外，所有接口都需要 API Key：
+
+```http
+Authorization: Bearer oak_xxxxxxxx
+```
+
+或 `X-API-Key: oak_xxxxxxxx`。缺失或无效返回 401 `unauthorized`，
+权限不足返回 403 `forbidden`。
+
+角色权限矩阵（全局角色，不支持资源级授权）：
+
+| 角色 | 权限点 |
+|---|---|
+| `viewer` | `read` |
+| `developer` | `read`、`write:agents`、`invoke:tools` |
+| `admin` | 全部，含 `write:tools`、`write:policy`、`write:keys` |
+
 ### 分页
 
 所有列表接口统一返回分页信封：
@@ -40,9 +59,11 @@ Base URL：`/api/v1`
 
 | code | HTTP | 含义 |
 |---|---|---|
+| `unauthorized` | 401 | 缺少或无效的 API Key |
+| `forbidden` | 403 | 当前角色权限不足 |
 | `not_found` | 404 | 资源不存在 |
 | `validation_error` | 422 | 请求体或查询参数校验失败（`details` 为字段级错误） |
-| `conflict` | 409 | 资源冲突（如工具名重复） |
+| `conflict` | 409 | 资源冲突（工具名重复、停用最后一个 admin 密钥等） |
 | `model_not_configured` | 424 | 缺少模型密钥等配置 |
 | `model_provider_error` | 502 / 504 | 模型服务错误或超时 |
 | `internal_error` | 500 | 未预期异常 |
@@ -154,8 +175,7 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 注意：工具执行成功会**立即提交**其调用记录，之后即便模型调用失败也不会回滚——
 真实副作用不应被假装撤销。
 
-> ⚠️ `/tools` 与 `/policy-rules` 目前无认证（V0.2 尚未接入鉴权），等同于匿名可写，
-> 不可暴露在可信网络之外。详见 [security.md](security.md)。
+注册工具与写策略需要 `admin`；`developer` 只能调用已被放行的工具。
 
 ### 观测
 
@@ -170,6 +190,16 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 模型可以在一轮回复中提出工具调用，平台会逐个走上述治理流程，并把结果（含拒绝原因）
 回灌给模型继续推理，最多 `MAX_TOOL_ITERATIONS`（默认 4）轮。
 只有**策略已放行**的工具才会出现在模型可用的 tools 列表里。
+
+## 认证与密钥管理
+
+全部端点需要 `write:keys`（即仅 admin）。
+
+- `POST /api-keys`：`{ name, role }`，响应里包含 **仅出现一次** 的 `api_key` 明文。
+- `GET /api-keys`：列表（分页），只返回 `key_prefix`，不含明文或哈希。
+- `PATCH /api-keys/{id}`：`{ enabled }`，启停密钥；停用最后一个可用 admin 密钥返回 409。
+
+`/health`、`/docs`、`/openapi.json` 为公开端点。
 
 ## 后续版本
 

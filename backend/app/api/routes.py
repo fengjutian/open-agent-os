@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_principal, require_permission
 from app.api.helpers import get_or_404
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.request_context import run_id_var
+from app.core.security import READ, WRITE_AGENTS, Principal
 from app.db.session import get_db
 from app.models.entities import Agent, Conversation, Message
 from app.schemas.dto import (
@@ -40,14 +42,18 @@ _MODEL_ERRORS = {
     504: {"model": ErrorEnvelope, "description": "模型服务超时"},
 }
 
-router = APIRouter(prefix="/api/v1", responses=_COMMON_ERRORS)
+router = APIRouter(prefix="/api/v1", responses=_COMMON_ERRORS, dependencies=[Depends(get_principal)])
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
 @router.post("/agents", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
-def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
+def create_agent(
+    payload: AgentCreate,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
     data = payload.model_dump()
     data["model"] = data["model"] or settings.model_name
     item = Agent(**data)
@@ -61,6 +67,7 @@ def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
 def list_agents(
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     total = db.scalar(select(func.count()).select_from(Agent)) or 0
@@ -72,12 +79,21 @@ def list_agents(
 
 
 @router.get("/agents/{agent_id}", response_model=AgentRead, responses=_NOT_FOUND)
-def get_agent(agent_id: str, db: Session = Depends(get_db)):
+def get_agent(
+    agent_id: str,
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
     return get_or_404(db, Agent, agent_id, "Agent")
 
 
 @router.patch("/agents/{agent_id}", response_model=AgentRead, responses=_NOT_FOUND)
-def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_db)):
+def update_agent(
+    agent_id: str,
+    payload: AgentUpdate,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
     item = get_or_404(db, Agent, agent_id, "Agent")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
@@ -91,7 +107,11 @@ def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_
     status_code=status.HTTP_204_NO_CONTENT,
     responses=_NOT_FOUND,
 )
-def delete_agent(agent_id: str, db: Session = Depends(get_db)):
+def delete_agent(
+    agent_id: str,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
     item = get_or_404(db, Agent, agent_id, "Agent")
     db.delete(item)
     db.commit()
@@ -102,7 +122,12 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db)):
     response_model=ConversationRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_conversation(agent_id: str, payload: ConversationCreate, db: Session = Depends(get_db)):
+def create_conversation(
+    agent_id: str,
+    payload: ConversationCreate,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
     get_or_404(db, Agent, agent_id, "Agent")
     item = Conversation(agent_id=agent_id, title=payload.title)
     db.add(item)
@@ -120,6 +145,7 @@ def list_conversations(
     agent_id: str,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     get_or_404(db, Agent, agent_id, "Agent")
@@ -148,6 +174,7 @@ def list_messages(
     conversation_id: str,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     get_or_404(db, Conversation, conversation_id, "Conversation")
@@ -175,6 +202,7 @@ def list_messages(
 async def send_message(
     conversation_id: str,
     payload: MessageCreate,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
     db: Session = Depends(get_db),
 ):
     conversation = get_or_404(db, Conversation, conversation_id, "Conversation")

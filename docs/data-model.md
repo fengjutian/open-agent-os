@@ -18,6 +18,12 @@
 
 关系：Agent 1:N PolicyRule（agent_id 为空则是全局规则）。
 
+## V0.2 认证
+- ApiKey：id、name（唯一）、key_prefix、key_hash（SHA-256，唯一索引）、role、enabled、created_at、last_used_at。
+
+只存哈希；`key_prefix` 仅用于列表展示辨识，不参与鉴权。角色是全局的，
+不做资源级授权，也没有组织/租户维度。
+
 ## 企业化扩展
 Organization、User、Membership、Role、Permission、ApiKey、AgentVersion、Run、RunEvent、
 Checkpoint、ExecutionArtifact、Secret。（ToolDefinition / PolicyRule / ToolInvocation /

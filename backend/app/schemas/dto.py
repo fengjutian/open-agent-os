@@ -232,3 +232,34 @@ class AgentToolRead(BaseModel):
     enabled: bool
     allowed: bool
     reason: str
+
+
+# ---------------------------------------------------------------------------
+# 认证
+# ---------------------------------------------------------------------------
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    role: Literal["admin", "developer", "viewer"] = "viewer"
+
+
+class ApiKeyUpdate(BaseModel):
+    enabled: bool | None = None
+
+
+class ApiKeyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    key_prefix: str
+    role: str
+    enabled: bool
+    created_at: UtcDatetime
+    last_used_at: UtcDatetime | None
+
+
+class ApiKeyCreated(ApiKeyRead):
+    """创建响应：明文密钥只在这里出现一次。"""
+
+    api_key: str

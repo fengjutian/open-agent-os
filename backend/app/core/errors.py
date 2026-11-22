@@ -15,6 +15,8 @@ class ErrorCode:
     NOT_FOUND = "not_found"
     VALIDATION_ERROR = "validation_error"
     CONFLICT = "conflict"
+    UNAUTHORIZED = "unauthorized"
+    FORBIDDEN = "forbidden"
     MODEL_NOT_CONFIGURED = "model_not_configured"
     MODEL_PROVIDER_ERROR = "model_provider_error"
     INTERNAL_ERROR = "internal_error"

@@ -13,9 +13,11 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_principal, principal_actor, require_permission
 from app.api.helpers import count_rows, get_or_404
 from app.core.errors import AppError, ErrorCode
 from app.core.request_context import run_id_var
+from app.core.security import INVOKE_TOOLS, READ, WRITE_POLICY, WRITE_TOOLS, Principal
 from app.db.session import get_db
 from app.models.entities import Agent, AuditLog, Conversation, PolicyRule, ToolDefinition, ToolInvocation
 from app.schemas.dto import (
@@ -52,7 +54,7 @@ _INVOKE_ERRORS = {
     504: {"model": ErrorEnvelope, "description": "工具执行超时"},
 }
 
-router = APIRouter(prefix="/api/v1", tags=["tools"])
+router = APIRouter(prefix="/api/v1", tags=["tools"], dependencies=[Depends(get_principal)])
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +63,11 @@ router = APIRouter(prefix="/api/v1", tags=["tools"])
 
 
 @router.post("/tools", response_model=ToolRead, status_code=status.HTTP_201_CREATED, responses=_TOOL_ERRORS)
-def create_tool(payload: ToolCreate, db: Session = Depends(get_db)):
+def create_tool(
+    payload: ToolCreate,
+    principal: Principal = Depends(require_permission(WRITE_TOOLS)),
+    db: Session = Depends(get_db),
+):
     registry = ToolRegistry(db)
     if registry.get_by_name(payload.name) is not None:
         raise AppError(ErrorCode.CONFLICT, f"工具 {payload.name} 已存在", status_code=409)
@@ -73,7 +79,7 @@ def create_tool(payload: ToolCreate, db: Session = Depends(get_db)):
     db.add(tool)
     AuditService(db).record(
         action="tool.register",
-        actor="system",
+        actor=principal_actor(principal),
         resource=f"tool:{payload.name}",
         decision="allow",
         reason="注册工具定义",
@@ -92,6 +98,7 @@ def create_tool(payload: ToolCreate, db: Session = Depends(get_db)):
 def list_tools(
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     total = count_rows(db, ToolDefinition)
@@ -102,19 +109,28 @@ def list_tools(
 
 
 @router.get("/tools/{tool_id}", response_model=ToolRead, responses=_TOOL_ERRORS)
-def get_tool(tool_id: str, db: Session = Depends(get_db)):
+def get_tool(
+    tool_id: str,
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
     return get_or_404(db, ToolDefinition, tool_id, "Tool")
 
 
 @router.patch("/tools/{tool_id}", response_model=ToolRead, responses=_TOOL_ERRORS)
-def update_tool(tool_id: str, payload: ToolUpdate, db: Session = Depends(get_db)):
+def update_tool(
+    tool_id: str,
+    payload: ToolUpdate,
+    principal: Principal = Depends(require_permission(WRITE_TOOLS)),
+    db: Session = Depends(get_db),
+):
     tool = get_or_404(db, ToolDefinition, tool_id, "Tool")
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     for key, value in changes.items():
         setattr(tool, key, value)
     AuditService(db).record(
         action="tool.update",
-        actor="system",
+        actor=principal_actor(principal),
         resource=f"tool:{tool.name}",
         decision="allow",
         reason="更新工具定义",
@@ -136,7 +152,11 @@ def update_tool(tool_id: str, payload: ToolUpdate, db: Session = Depends(get_db)
     status_code=status.HTTP_201_CREATED,
     responses=_TOOL_ERRORS,
 )
-def create_policy_rule(payload: PolicyRuleCreate, db: Session = Depends(get_db)):
+def create_policy_rule(
+    payload: PolicyRuleCreate,
+    principal: Principal = Depends(require_permission(WRITE_POLICY)),
+    db: Session = Depends(get_db),
+):
     if payload.agent_id is not None:
         get_or_404(db, Agent, payload.agent_id, "Agent")
 
@@ -144,7 +164,7 @@ def create_policy_rule(payload: PolicyRuleCreate, db: Session = Depends(get_db))
     db.add(rule)
     AuditService(db).record(
         action="policy.create",
-        actor="system",
+        actor=principal_actor(principal),
         resource=f"tool:{payload.tool_name}",
         decision=payload.effect,
         reason=payload.note or "创建策略规则",
@@ -164,6 +184,7 @@ def list_policy_rules(
     agent_id: str | None = Query(default=None),
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     conditions = [PolicyRule.agent_id == agent_id] if agent_id else []
@@ -191,6 +212,7 @@ def list_agent_tools(
     agent_id: str,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     get_or_404(db, Agent, agent_id, "Agent")
@@ -238,6 +260,7 @@ async def invoke_agent_tool(
     agent_id: str,
     tool_name: str,
     payload: ToolInvokeRequest,
+    _principal: Principal = Depends(require_permission(INVOKE_TOOLS)),
     db: Session = Depends(get_db),
 ):
     get_or_404(db, Agent, agent_id, "Agent")
@@ -281,6 +304,7 @@ def list_tool_invocations(
     tool_name: str | None = Query(default=None),
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     conditions = []
@@ -307,6 +331,7 @@ def list_audit_logs(
     action: str | None = Query(default=None),
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
     db: Session = Depends(get_db),
 ):
     conditions = []

@@ -1,20 +1,185 @@
-import {useEffect,useState} from "react";
-import {api} from "./api";
+import {useCallback,useEffect,useState} from "react";
+import {ApiError,api,keyStore} from "./api";
 import type {Agent,Conversation,Message} from "./types";
 
 export default function App(){
- const [agents,setAgents]=useState<Agent[]>([]),[agent,setAgent]=useState<Agent|null>(null);
- const [conversations,setConversations]=useState<Conversation[]>([]),[conversation,setConversation]=useState<Conversation|null>(null);
- const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
- async function refresh(){const page=await api.agents();setAgents(page.items);if(!agent&&page.items.length)setAgent(page.items[0]);}
- useEffect(()=>{refresh().catch(e=>setError(String(e)));},[]);
- useEffect(()=>{if(!agent)return;setConversation(null);setMessages([]);api.conversations(agent.id).then(page=>setConversations(page.items)).catch(e=>setError(String(e)));},[agent?.id]);
- async function open(c:Conversation){setConversation(c);try{setMessages((await api.messages(c.id)).items);}catch(e){setError(String(e));}}
- async function addAgent(){const name=prompt("Agent 名称");if(!name?.trim())return;try{const a=await api.createAgent({name:name.trim(),description:"AI assistant",system_prompt:"You are a helpful assistant. Answer in Chinese unless asked otherwise.",model:"gpt-4o-mini"});const page=await api.agents();setAgents(page.items);setAgent(a);}catch(e){setError(String(e));}}
- async function addConversation(){if(!agent)return;try{const c=await api.createConversation(agent.id);setConversations(old=>[c,...old]);await open(c);}catch(e){setError(String(e));}}
- async function send(){if(!conversation||!input.trim()||busy)return;const text=input.trim();setInput("");setBusy(true);setError("");try{const r=await api.sendMessage(conversation.id,text);setMessages(old=>[...old,r.user_message,r.assistant_message]);}catch(e){setError(String(e));setInput(text);}finally{setBusy(false);}}
- return <div className="shell"><aside className="sidebar"><div className="brand"><b>A</b><span><strong>Agent Platform</strong><small>Enterprise Workspace</small></span></div><div className="label">AGENTS <button onClick={addAgent}>＋</button></div>{agents.map(a=><button key={a.id} className={`agent ${agent?.id===a.id?"active":""}`} onClick={()=>setAgent(a)}><i>{a.name[0]?.toUpperCase()}</i><span><strong>{a.name}</strong><small>{a.model}</small></span></button>)}{!agents.length&&<p className="muted">点击 + 创建第一个 Agent</p>}<footer>● Local development</footer></aside>
- <main><header><div><small>WORKSPACE / AGENTS</small><h1>{agent?.name??"欢迎使用 Agent Platform"}</h1></div>{agent&&<button className="primary" onClick={addConversation}>新建会话</button>}</header>
- <div className="layout"><section className="sessions"><h3>会话</h3><p className="muted">选择会话开始协作</p>{conversations.map(c=><button key={c.id} className={`session ${conversation?.id===c.id?"active":""}`} onClick={()=>open(c)}>◷　{c.title}</button>)}</section>
- <section className="chat">{!conversation?<div className="welcome"><div>✳</div><h2>让 Agent 开始工作</h2><p>创建或选择会话，然后输入第一个任务。</p>{agent&&<button className="primary" onClick={addConversation}>创建会话</button>}</div>:<><div className="chat-head"><div><b>{conversation.title}</b><small>{agent?.name} · {agent?.model}</small></div><span>● Ready</span></div><div className="messages">{messages.map(m=><div key={m.id} className={`message ${m.role}`}><label>{m.role==="user"?"YOU":"AGENT"}</label><p>{m.content}</p></div>)}{busy&&<p className="muted">Agent 正在思考…</p>}</div><div className="composer"><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}} placeholder="描述你希望 Agent 完成的任务…"/><div><small>Enter 发送 · Shift + Enter 换行</small><button className="primary" disabled={busy||!input.trim()} onClick={send}>{busy?"处理中…":"发送 ↑"}</button></div></div></>}</section></div></main>{error&&<button className="error" onClick={()=>setError("")}>{error} ×</button>}</div>;
+ const [apiKey,setApiKey]=useState(()=>keyStore.get());
+ const [keyDraft,setKeyDraft]=useState("");
+ const [agents,setAgents]=useState<Agent[]>([]);
+ const [agent,setAgent]=useState<Agent|null>(null);
+ const [conversations,setConversations]=useState<Conversation[]>([]);
+ const [conversation,setConversation]=useState<Conversation|null>(null);
+ const [messages,setMessages]=useState<Message[]>([]);
+ const [input,setInput]=useState("");
+ const [busy,setBusy]=useState(false);
+ const [error,setError]=useState("");
+
+ /** 401 意味着密钥不可用：清掉本地密钥并回到准入界面。 */
+ const handleError=useCallback((err:unknown)=>{
+  if(err instanceof ApiError && err.status===401){
+   keyStore.set("");
+   setApiKey("");
+   setError("API Key 无效或已停用，请重新输入。");
+   return;
+  }
+  setError(err instanceof Error ? err.message : String(err));
+ },[]);
+
+ const refresh=useCallback(async()=>{
+  try{
+   const page=await api.agents();
+   setAgents(page.items);
+   setAgent(current=>current ?? page.items[0] ?? null);
+  }catch(err){handleError(err);}
+ },[handleError]);
+
+ useEffect(()=>{if(apiKey) refresh();},[apiKey,refresh]);
+
+ useEffect(()=>{
+  if(!agent) return;
+  setConversation(null);
+  setMessages([]);
+  api.conversations(agent.id).then(page=>setConversations(page.items)).catch(handleError);
+ },[agent?.id,handleError]);
+
+ async function openConversation(target:Conversation){
+  setConversation(target);
+  try{setMessages((await api.messages(target.id)).items);}catch(err){handleError(err);}
+ }
+
+ async function addAgent(){
+  const name=prompt("Agent 名称");
+  if(!name?.trim()) return;
+  try{
+   const created=await api.createAgent({
+    name:name.trim(),
+    description:"AI assistant",
+    system_prompt:"You are a helpful assistant. Answer in Chinese unless asked otherwise.",
+    model:"gpt-4o-mini",
+   });
+   const page=await api.agents();
+   setAgents(page.items);
+   setAgent(created);
+  }catch(err){handleError(err);}
+ }
+
+ async function addConversation(){
+  if(!agent) return;
+  try{
+   const created=await api.createConversation(agent.id);
+   setConversations(old=>[created,...old]);
+   await openConversation(created);
+  }catch(err){handleError(err);}
+ }
+
+ async function send(){
+  if(!conversation||!input.trim()||busy) return;
+  const text=input.trim();
+  setInput("");
+  setBusy(true);
+  setError("");
+  try{
+   const result=await api.sendMessage(conversation.id,text);
+   setMessages(old=>[...old,result.user_message,result.assistant_message]);
+  }catch(err){
+   handleError(err);
+   setInput(text);
+  }finally{setBusy(false);}
+ }
+
+ function signIn(event:React.FormEvent){
+  event.preventDefault();
+  const key=keyDraft.trim();
+  if(!key) return;
+  keyStore.set(key);
+  setKeyDraft("");
+  setError("");
+  setApiKey(key);
+ }
+
+ function signOut(){
+  keyStore.set("");
+  setApiKey("");
+  setAgents([]);
+  setAgent(null);
+  setConversation(null);
+  setMessages([]);
+ }
+
+ if(!apiKey){
+  return <div className="shell"><main>
+   <header><div><small>WORKSPACE / AUTH</small><h1>需要 API Key</h1></div></header>
+   <section className="chat"><div className="welcome">
+    <div>⌘</div>
+    <h2>输入 API Key 继续</h2>
+    <p>后端已默认开启认证。首次启动时，管理密钥会打印在服务日志里（形如 <code>oak_...</code>）。</p>
+    <form onSubmit={signIn}>
+     <input className="key-input" type="password" value={keyDraft} autoFocus
+      onChange={e=>setKeyDraft(e.target.value)} placeholder="oak_..." />
+     <button className="primary" type="submit" disabled={!keyDraft.trim()}>进入</button>
+    </form>
+    {error&&<p className="muted">{error}</p>}
+   </div></section>
+  </main></div>;
+ }
+
+ const activeAgent=agent;
+ return <div className="shell">
+  <aside className="sidebar">
+   <div className="brand"><b>A</b><span><strong>Agent Platform</strong><small>Enterprise Workspace</small></span></div>
+   <div className="label">AGENTS <button onClick={addAgent}>＋</button></div>
+   {agents.map(item=><button key={item.id} className={`agent ${activeAgent?.id===item.id?"active":""}`} onClick={()=>setAgent(item)}>
+    <i>{item.name[0]?.toUpperCase()}</i>
+    <span><strong>{item.name}</strong><small>{item.model}</small></span>
+   </button>)}
+   {!agents.length&&<p className="muted">点击 + 创建第一个 Agent</p>}
+   <footer><button className="link" onClick={signOut}>切换 API Key</button></footer>
+  </aside>
+  <main>
+   <header>
+    <div><small>WORKSPACE / AGENTS</small><h1>{activeAgent?.name ?? "欢迎使用 Agent Platform"}</h1></div>
+    {activeAgent&&<button className="primary" onClick={addConversation}>新建会话</button>}
+   </header>
+   <div className="layout">
+    <section className="sessions">
+     <h3>会话</h3>
+     <p className="muted">选择会话开始协作</p>
+     {conversations.map(item=><button key={item.id} className={`session ${conversation?.id===item.id?"active":""}`} onClick={()=>openConversation(item)}>◷　{item.title}</button>)}
+    </section>
+    <section className="chat">
+     {!conversation
+      ? <div className="welcome">
+         <div>✳</div>
+         <h2>让 Agent 开始工作</h2>
+         <p>创建或选择会话，然后输入第一个任务。</p>
+         {activeAgent&&<button className="primary" onClick={addConversation}>创建会话</button>}
+        </div>
+      : <>
+         <div className="chat-head">
+          <div><b>{conversation.title}</b><small>{activeAgent?.name} · {activeAgent?.model}</small></div>
+          <span>● Ready</span>
+         </div>
+         <div className="messages">
+          {messages.map(item=><div key={item.id} className={`message ${item.role}`}>
+           <label>{item.role==="user"?"YOU":"AGENT"}</label>
+           <p>{item.content}</p>
+          </div>)}
+          {busy&&<p className="muted">Agent 正在思考…</p>}
+         </div>
+         <div className="composer">
+          <textarea value={input} onChange={e=>setInput(e.target.value)}
+           onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+           placeholder="描述你希望 Agent 完成的任务…"/>
+          <div>
+           <small>Enter 发送 · Shift + Enter 换行</small>
+           <button className="primary" disabled={busy||!input.trim()} onClick={send}>{busy?"处理中…":"发送 ↑"}</button>
+          </div>
+         </div>
+        </>
+     }
+    </section>
+   </div>
+  </main>
+  {error&&<button className="error" onClick={()=>setError("")}>{error} ×</button>}
+ </div>;
 }

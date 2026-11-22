@@ -34,6 +34,43 @@ npm run dev
 默认 Mock Provider，不需要模型密钥。配置 backend/.env 的 MODEL_PROVIDER、MODEL_BASE_URL、MODEL_API_KEY 可切换到 OpenAI-compatible API；
 MODEL_NAME 是创建 Agent 时未显式指定模型所使用的默认模型。
 
+## 认证与权限
+
+**认证默认开启。** 首次启动时，如果没有配置 `BOOTSTRAP_ADMIN_API_KEY`，系统会自动生成一个
+管理员密钥并**只在日志里打印一次**：
+
+```json
+{"level":"WARNING","logger":"app.main","message":"已生成初始 admin API Key（仅显示这一次，请立即保存）",
+ "api_key":"oak_ppvK-CZsptOgJdQuiGs1KGlThQkXbRGtUTnmaLowHz0"}
+```
+
+把它填到 `backend/.env` 的 `BOOTSTRAP_ADMIN_API_KEY`（或直接贴到前端界面），之后所有请求都要带凭据：
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/agents
+# 或：-H "X-API-Key: $API_KEY"
+```
+
+角色与权限（矩阵写死在代码里，不通过 API 修改）：
+
+| 角色 | 权限 |
+|---|---|
+| `viewer` | 只读：Agent / 会话 / 消息 / 工具 / 审计 |
+| `developer` | 只读 + 创建 Agent、发消息、调用**已被放行**的工具 |
+| `admin` | 全部，含注册工具、维护策略、管理密钥 |
+
+- `/health`、`/docs`、`/openapi.json` 不需要认证。
+- 密钥只存 SHA-256 摘要，明文仅在创建响应里出现一次。
+- 系统不允许停用最后一个可用的 admin 密钥，避免把自己锁在门外。
+- `AUTH_ENABLED=false` 等价于匿名管理员，仅供本地调试，绝不要带进部署。
+
+```bash
+# 创建一把只读密钥
+curl -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"ci-viewer","role":"viewer"}'
+```
+
 ## Docker Compose 启动
 
 ```bash
@@ -105,8 +142,11 @@ Tool Registry → JSON Schema → Policy Engine → Audit → Execution
 **默认拒绝。** 注册一个工具不会让它可用，必须显式添加 allow 规则：
 
 ```bash
+AUTH='-H "Authorization: Bearer $API_KEY"'
+
 # 1. 注册工具（内建实现只有 echo / current_time）
-curl -X POST localhost:8000/api/v1/tools -H 'Content-Type: application/json' -d '{
+curl -X POST localhost:8000/api/v1/tools -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d '{
   "name": "echo",
   "description": "回显文本",
   "input_schema": {"type":"object","properties":{"text":{"type":"string"}},
@@ -116,14 +156,18 @@ curl -X POST localhost:8000/api/v1/tools -H 'Content-Type: application/json' -d 
 
 # 2. 此时调用会被拒绝（deny-by-default）
 curl -X POST localhost:8000/api/v1/agents/<AGENT_ID>/tools/echo/invoke \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' -d '{"arguments":{"text":"hi"}}'
 # => {"status":"denied","error_code":"policy_denied", ...}
 
 # 3. 显式放行后再调用
-curl -X POST localhost:8000/api/v1/policy-rules -H 'Content-Type: application/json' \
+curl -X POST localhost:8000/api/v1/policy-rules -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
   -d '{"agent_id":"<AGENT_ID>","tool_name":"echo","effect":"allow"}'
 # => {"status":"succeeded","result":{"text":"hi"}, ...}
 ```
+
+注意：注册工具与写策略需要 `admin`；`developer` 只能调用已被放行的工具。
 
 要点：
 
@@ -154,7 +198,11 @@ curl -X POST localhost:8000/api/v1/policy-rules -H 'Content-Type: application/js
 - 统一错误信封、分页、结构化日志与 request_id/run_id
 - 工具注册表 + JSON Schema 校验 + 服务端策略（deny-by-default）+ 审计
 - Agent Loop 工具调用（轮次上限可配）
-- React Agent 管理和聊天界面
+- API Key 认证 + admin/developer/viewer 三角色 RBAC
+- React Agent 管理和聊天界面（含 API Key 准入）
 
 ## 重要边界
-V0.1 不执行任意 Shell / Python / Node 代码；没有认证、多租户、RBAC、生产级任务恢复。Rust Executor 目前是架构预留，不是可用 Sandbox。生产环境必须补充隔离机制、鉴权、审计、限流和密钥管理。
+V0.2 不执行任意 Shell / Python / Node 代码。已有 API Key 认证与三角色 RBAC，
+但**没有**多租户隔离、OIDC/SSO、密钥轮换与过期、限流与配额、生产级任务恢复。
+Rust Executor 目前是架构预留，不是可用 Sandbox。
+生产环境必须补充隔离机制、组织级鉴权、限流和密钥管理。

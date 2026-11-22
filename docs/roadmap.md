@@ -19,7 +19,8 @@
 - 评估 gVisor / Firecracker
 
 ## V0.4 Enterprise
-- OIDC、组织与多租户、RBAC/ABAC
+- ⏳ OIDC、组织与多租户、RBAC/ABAC
+  （已提前落地：API Key 认证 + admin/developer/viewer 三角色 RBAC）
 - PostgreSQL、Redis、Temporal
 - 审计、限流、配额、成本管理
 - OpenTelemetry
