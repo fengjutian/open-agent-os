@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 115
+target-version = "py312"
+src = ["."]
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "B008", # FastAPI 的 Depends()/Query() 就是要在默认值里调用
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

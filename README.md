@@ -5,7 +5,7 @@ V0.1 starter：React + TypeScript 前端、Python + FastAPI Agent Core，预留 
 ## 目录结构
 
 ```text
-backend/          FastAPI + SQLAlchemy（Agent Core）
+backend/          FastAPI + SQLAlchemy + Alembic（Agent Core）
 frontend/         React + TypeScript（Vite）
 rust-executor/    Rust Executor —— V0.3 占位，当前拒绝一切执行请求
 docs/             PRD / 架构 / 数据模型 / API 契约 / 安全基线 / Roadmap
@@ -31,7 +31,8 @@ npm run dev
 
 访问 http://localhost:5173，API 文档 http://localhost:8000/docs。
 
-默认 Mock Provider，不需要模型密钥。配置 backend/.env 的 MODEL_PROVIDER、MODEL_BASE_URL、MODEL_API_KEY、MODEL_NAME 可切换到 OpenAI-compatible API。
+默认 Mock Provider，不需要模型密钥。配置 backend/.env 的 MODEL_PROVIDER、MODEL_BASE_URL、MODEL_API_KEY 可切换到 OpenAI-compatible API；
+MODEL_NAME 是创建 Agent 时未显式指定模型所使用的默认模型。
 
 ## Docker Compose 启动
 
@@ -45,18 +46,58 @@ docker compose up --build
 - SQLite 数据落在命名卷 `agent-data` 的 `/app/data/agent_platform.db`，重建容器不丢数据。
   注意：compose 用 `environment` 固定了 `DATABASE_URL`，其优先级高于 `backend/.env`；要换数据库请直接改 `docker-compose.yml`。
 
+## 数据库迁移
+
+Schema 由 Alembic 唯一负责，应用启动时会自动 `upgrade head`（空库即建表）。
+
+```bash
+cd backend
+alembic upgrade head                                  # 手动升级
+alembic revision --autogenerate -m "add something"    # 改完模型后生成迁移
+alembic downgrade -1                                  # 回滚一步
+```
+
+数据库 URL 来自 `app.core.config.settings`（即 .env / 环境变量），`alembic.ini` 里不再重复配置，
+避免两处配置漂移。`tests/test_migrations.py` 会校验「迁移后的结构」与「ORM 模型」完全一致。
+
 ## 测试与构建
 
 ```bash
-cd backend && python -m pytest          # 后端测试
-cd frontend && npm run build            # tsc -b && vite build
+cd backend && pip install -r requirements-dev.txt && pytest    # 测试
+cd backend && ruff check .                                     # 静态检查
+cd frontend && npm run build                                   # tsc -b && vite build
 cargo build --manifest-path rust-executor/Cargo.toml
 ```
+
+CI（`.github/workflows/ci.yml`）会跑：Ruff、pytest、前端构建、Rust 构建，以及 `docker compose config`。
+
+## 错误与分页契约
+
+- 列表接口统一返回 `{ items, total, limit, offset }`，`limit` 默认 50、上限 200。
+- 错误统一返回 `{ "error": { code, message, request_id, details } }`，`code` 稳定可分支。
+- 每个响应都带 `X-Request-ID`；发消息的响应额外返回 `run_id`。
+
+详见 [docs/api-contract.md](docs/api-contract.md)。
+
+## 可观测性
+
+日志为单行 JSON，默认包含 `request_id`；Agent 运行期间额外带 `run_id`：
+
+```json
+{"ts":"...","level":"INFO","logger":"app.api.middleware","message":"request",
+ "request_id":"req_...","method":"POST","path":"/api/v1/conversations/.../messages",
+ "status":200,"duration_ms":15.98}
+```
+
+## 上下文窗口
+
+`CONTEXT_MAX_CHARS`（默认 24000）限制单次请求的上下文预算。超出时从最旧的历史消息开始丢弃，
+最新的用户输入始终保留（过长则截断尾部），并在日志中记录 `context trimmed to budget` 事件。
 
 ## 依赖锁定
 
 - 前端：`package.json` 使用精确版本，`package-lock.json` 已提交，CI/镜像用 `npm ci`。
-- 后端：`requirements.txt` 使用 `==` 精确版本。
+- 后端：`requirements.txt`（运行时）与 `requirements-dev.txt`（测试/lint）均使用 `==` 精确版本。
 - 升级依赖请显式改版本并同时更新锁文件，不要用 `latest`。
 
 ## Rust Executor 现状
@@ -66,8 +107,9 @@ cargo build --manifest-path rust-executor/Cargo.toml
 ## 当前能力
 - Agent CRUD（创建、列表、详情、更新、删除）
 - 创建会话、查看消息、发送消息
-- SQLite 持久化
+- SQLite 持久化 + Alembic 迁移
 - Mock / OpenAI-compatible 模型适配器
+- 统一错误信封、分页、结构化日志与 request_id/run_id
 - React Agent 管理和聊天界面
 
 ## 重要边界

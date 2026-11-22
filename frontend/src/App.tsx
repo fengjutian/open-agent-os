@@ -6,11 +6,11 @@ export default function App(){
  const [agents,setAgents]=useState<Agent[]>([]),[agent,setAgent]=useState<Agent|null>(null);
  const [conversations,setConversations]=useState<Conversation[]>([]),[conversation,setConversation]=useState<Conversation|null>(null);
  const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
- async function refresh(){const data=await api.agents();setAgents(data);if(!agent&&data.length)setAgent(data[0]);}
+ async function refresh(){const page=await api.agents();setAgents(page.items);if(!agent&&page.items.length)setAgent(page.items[0]);}
  useEffect(()=>{refresh().catch(e=>setError(String(e)));},[]);
- useEffect(()=>{if(!agent)return;setConversation(null);setMessages([]);api.conversations(agent.id).then(setConversations).catch(e=>setError(String(e)));},[agent?.id]);
- async function open(c:Conversation){setConversation(c);try{setMessages(await api.messages(c.id));}catch(e){setError(String(e));}}
- async function addAgent(){const name=prompt("Agent 名称");if(!name?.trim())return;try{const a=await api.createAgent({name:name.trim(),description:"AI assistant",system_prompt:"You are a helpful assistant. Answer in Chinese unless asked otherwise.",model:"gpt-4o-mini"});const data=await api.agents();setAgents(data);setAgent(a);}catch(e){setError(String(e));}}
+ useEffect(()=>{if(!agent)return;setConversation(null);setMessages([]);api.conversations(agent.id).then(page=>setConversations(page.items)).catch(e=>setError(String(e)));},[agent?.id]);
+ async function open(c:Conversation){setConversation(c);try{setMessages((await api.messages(c.id)).items);}catch(e){setError(String(e));}}
+ async function addAgent(){const name=prompt("Agent 名称");if(!name?.trim())return;try{const a=await api.createAgent({name:name.trim(),description:"AI assistant",system_prompt:"You are a helpful assistant. Answer in Chinese unless asked otherwise.",model:"gpt-4o-mini"});const page=await api.agents();setAgents(page.items);setAgent(a);}catch(e){setError(String(e));}}
  async function addConversation(){if(!agent)return;try{const c=await api.createConversation(agent.id);setConversations(old=>[c,...old]);await open(c);}catch(e){setError(String(e));}}
  async function send(){if(!conversation||!input.trim()||busy)return;const text=input.trim();setInput("");setBusy(true);setError("");try{const r=await api.sendMessage(conversation.id,text);setMessages(old=>[...old,r.user_message,r.assistant_message]);}catch(e){setError(String(e));setInput(text);}finally{setBusy(false);}}
  return <div className="shell"><aside className="sidebar"><div className="brand"><b>A</b><span><strong>Agent Platform</strong><small>Enterprise Workspace</small></span></div><div className="label">AGENTS <button onClick={addAgent}>＋</button></div>{agents.map(a=><button key={a.id} className={`agent ${agent?.id===a.id?"active":""}`} onClick={()=>setAgent(a)}><i>{a.name[0]?.toUpperCase()}</i><span><strong>{a.name}</strong><small>{a.model}</small></span></button>)}{!agents.length&&<p className="muted">点击 + 创建第一个 Agent</p>}<footer>● Local development</footer></aside>

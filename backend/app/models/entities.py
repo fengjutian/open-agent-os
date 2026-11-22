@@ -1,11 +1,14 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
+
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db.session import Base
 
+
 def now_utc():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 class Agent(Base):
     __tablename__ = "agents"
@@ -16,7 +19,9 @@ class Agent(Base):
     model: Mapped[str] = mapped_column(String(120), default="gpt-4o-mini")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-    conversations: Mapped[list["Conversation"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="agent", cascade="all, delete-orphan"
+    )
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -26,7 +31,9 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     agent: Mapped[Agent] = relationship(back_populates="conversations")
-    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
+    )
 
 class Message(Base):
     __tablename__ = "messages"

@@ -1,17 +1,58 @@
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from datetime import UTC, datetime
+from typing import Annotated, Any
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+
+def _assume_utc(value: object) -> object:
+    """SQLite 不保存时区，读回来是 naive datetime，这里显式补上 UTC。
+
+    否则接口会输出 "2026-11-22T12:20:06"（真实含义是 UTC），
+    前端按本地时区解析就会整体偏 8 小时。
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+UtcDatetime = Annotated[datetime, BeforeValidator(_assume_utc)]
+
+
+class Page[T](BaseModel):
+    """列表接口的统一分页信封。"""
+
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    request_id: str
+    details: Any | None = None
+
+
+class ErrorEnvelope(BaseModel):
+    """错误响应信封，用于 OpenAPI 文档声明。"""
+
+    error: ErrorDetail
+
 
 class AgentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    description: str | None = None
-    system_prompt: str = "You are a helpful assistant."
-    model: str = "gpt-4o-mini"
+    description: str | None = Field(default=None, max_length=2000)
+    system_prompt: str = Field(default="You are a helpful assistant.", max_length=20000)
+    # 省略时使用 settings.model_name，避免模型名在多处硬编码。
+    model: str | None = Field(default=None, max_length=120)
+
 
 class AgentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = None
-    system_prompt: str | None = None
-    model: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
+    system_prompt: str | None = Field(default=None, max_length=20000)
+    model: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> "AgentUpdate":
@@ -25,6 +66,7 @@ class AgentUpdate(BaseModel):
                 raise ValueError(f"{field} 不可为 null")
         return self
 
+
 class AgentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -32,22 +74,26 @@ class AgentRead(BaseModel):
     description: str | None
     system_prompt: str
     model: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
 
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", max_length=200)
+
 
 class ConversationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     agent_id: str
     title: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=30000)
+
 
 class MessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -55,8 +101,11 @@ class MessageRead(BaseModel):
     conversation_id: str
     role: str
     content: str
-    created_at: datetime
+    created_at: UtcDatetime
+
 
 class SendMessageResponse(BaseModel):
+    # run_id 用于串联一次 Agent 运行的所有日志/事件；V0.2 起会落库为 Run 表。
+    run_id: str
     user_message: MessageRead
     assistant_message: MessageRead

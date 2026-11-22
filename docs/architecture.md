@@ -1,5 +1,10 @@
 # 架构设计
 
+> **本文描述的是目标架构，不是当前实现。** V0.1 已落地的是其中的 Agent Core 竖切面
+> （REST API、Agent Runtime、Model Gateway、SQLite + Alembic、结构化日志），
+> Tool Registry / Policy Engine / Workflow Engine / Rust Sandbox 及 PostgreSQL、Redis、
+> Temporal、Qdrant、MinIO、OTel 均尚未实现。当前能力清单以 README 为准。
+
 ## 总体结构
 ```text
 React + TypeScript
