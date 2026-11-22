@@ -1,6 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.models.entities import Agent, Conversation, Message
+from app.models.entities import Agent, Conversation, Message, now_utc
 from app.services.model_gateway import get_model_provider
 
 class AgentRuntime:
@@ -19,6 +19,9 @@ class AgentRuntime:
         answer = await get_model_provider().generate(model=agent.model, messages=messages)
         assistant_message = Message(conversation_id=conversation.id, role="assistant", content=answer)
         db.add(assistant_message)
+        # onupdate 只在 conversations 行本身被 UPDATE 时触发，而发消息只写 messages 表，
+        # 因此必须显式推进 updated_at，否则会话列表按 updated_at 的排序永远反映不出新活动。
+        conversation.updated_at = now_utc()
         db.commit()
         db.refresh(user_message)
         db.refresh(assistant_message)

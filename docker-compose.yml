@@ -1,9 +1,18 @@
 services:
   backend:
     build: ./backend
-    env_file: ./backend/.env
+    # backend/.env 是可选的：缺失时用代码内默认值（Mock Provider）即可启动。
+    # 需要接真实模型时：cp backend/.env.example backend/.env 并填入 MODEL_*。
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # 注意：environment 的优先级高于 env_file，这里的 DATABASE_URL 会覆盖 backend/.env 中的同名项。
+      # 目的是把 SQLite 固定落在命名卷 /app/data 里，重建容器不丢数据；
+      # 同时不再把整个 /app 挂成卷（那样会让镜像里的代码更新永远不生效）。
+      DATABASE_URL: sqlite:////app/data/agent_platform.db
     ports: ["8000:8000"]
-    volumes: ["agent-data:/app"]
+    volumes: ["agent-data:/app/data"]
   frontend:
     build: ./frontend
     ports: ["5173:80"]

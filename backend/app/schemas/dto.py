@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class AgentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -12,6 +12,18 @@ class AgentUpdate(BaseModel):
     description: str | None = None
     system_prompt: str | None = None
     model: str | None = None
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "AgentUpdate":
+        """这几列在库中是 NOT NULL：允许"不传"（保持原值），但不允许显式传 null。
+
+        否则 setattr 会把 None 写进 NOT NULL 列，触发 IntegrityError 的裸 500。
+        description 列可空，显式传 null 用以清空，故不在此列。
+        """
+        for field in ("name", "system_prompt", "model"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} 不可为 null")
+        return self
 
 class AgentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
