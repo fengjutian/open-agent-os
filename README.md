@@ -197,6 +197,50 @@ curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/runs/<RUN_ID>/eve
 Run 上记录了 `iterations`、`tool_calls`、`prompt_chars`、`answer_chars`、`status` 与错误码；
 失败运行同样落库（`status=failed` + `run.failed` 事件），不会被静默丢弃。
 
+## 流式输出（SSE）
+
+```bash
+curl -N -X POST localhost:8000/api/v1/conversations/<ID>/messages/stream \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"content":"你好"}'
+```
+
+事件序列：
+
+```text
+run.started → delta(delta…) → [tool.call → tool.result …] → completed
+                                          ↘ error（建流之后出错）
+```
+
+- `delta` 是增量文本；`completed` 带上落库后的 `user_message` / `assistant_message`。
+- 鉴权、配额、会话存在性都在**建流之前**校验，失败仍是正常 HTTP 错误码；
+  开始推送后只能通过 `error` 事件报告。
+- 前端用 `fetch` + `ReadableStream` 解析（`EventSource` 只支持 GET 且带不了 Authorization 头）。
+- 服务端使用纯 ASGI 中间件：`BaseHTTPMiddleware` 对 `StreamingResponse` 是已知坑，
+  我们直接绕开它。
+
+## 评测与回归
+
+数据集是 JSON，用例 = 一次「发消息 + 断言」，可在 CI 里跑：
+
+```bash
+cd backend
+python -m app.evals --suite evals/baseline.json
+python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json report.json
+```
+
+```
+[baseline] 3/3 通过，耗时 210ms
+  PASS  简单问答  (118ms)
+  PASS  中文回复不丢字  (40ms)
+  PASS  回复完整落库  (39ms)
+```
+
+支持断言：`contains` / `not_contains` / `regex` / `run_status` / `min_tool_calls` /
+`max_tool_calls` / `max_duration_ms`。用例里写 `mock_reply` 或 `mock_tool_call`
+即使用确定性 provider，不依赖真实模型；不写则走配置里的模型（可用于评模型质量）。
+退出码 0/1，可直接卡 CI。
+
 ## 限流与配额
 
 | 限制 | 环境变量 | 默认 | 计数维度 |
@@ -239,6 +283,8 @@ Run 上记录了 `iterations`、`tool_calls`、`prompt_chars`、`answer_chars`�
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额
+- SSE 流式输出（前端增量渲染）
+- 评测与回归（JSON 数据集 + 断言 + CLI）
 - React 界面：对话、工具与策略、运行与审计三个视图
 
 ## 重要边界

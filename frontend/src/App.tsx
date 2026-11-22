@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useState} from "react";
-import {ApiError,api,keyStore} from "./api";
+import {ApiError,api,keyStore,sendMessageStream} from "./api";
 import {RunsPanel,ToolsPanel} from "./panels";
 import type {Agent,Conversation,Me,Message} from "./types";
 
@@ -18,6 +18,10 @@ export default function App(){
  const [input,setInput]=useState("");
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState("");
+ // 流式输出的临时状态：完成时会替换为真实消息
+ const [pendingText,setPendingText]=useState("");
+ const [streamText,setStreamText]=useState("");
+ const [streamTools,setStreamTools]=useState<string[]>([]);
 
  /** 401 意味着密钥不可用：清掉本地密钥并回到准入界面。 */
  const handleError=useCallback((err:unknown)=>{
@@ -89,13 +93,29 @@ export default function App(){
   setInput("");
   setBusy(true);
   setError("");
+  setPendingText(text);
+  setStreamText("");
+  setStreamTools([]);
   try{
-   const result=await api.sendMessage(conversation.id,text);
-   setMessages(old=>[...old,result.user_message,result.assistant_message]);
+   await sendMessageStream(conversation.id,text,{
+    onDelta:chunk=>setStreamText(old=>old+chunk),
+    onToolCall:tool=>setStreamTools(old=>[...old,tool]),
+    onToolResult:(tool,status)=>setStreamTools(old=>[...old,`${tool}:${status}`]),
+    onCompleted:payload=>setMessages(old=>[...old,payload.user_message,payload.assistant_message]),
+    onError:(code,message)=>{
+     setError(`${code}: ${message}`);
+     setInput(text);
+    },
+   });
   }catch(err){
    handleError(err);
    setInput(text);
-  }finally{setBusy(false);}
+  }finally{
+   setBusy(false);
+   setPendingText("");
+   setStreamText("");
+   setStreamTools([]);
+  }
  }
 
  function signIn(event:React.FormEvent){
@@ -199,7 +219,14 @@ export default function App(){
            <label>{item.role==="user"?"YOU":"AGENT"}</label>
            <p>{item.content}</p>
           </div>)}
-          {busy&&<p className="muted">Agent 正在思考…</p>}
+          {busy&&<>
+           <div className="message user"><label>YOU</label><p>{pendingText}</p></div>
+           <div className="message assistant">
+            <label>AGENT</label>
+            <p>{streamText||"…"}</p>
+            {streamTools.length>0&&<small className="muted">工具：{streamTools.join(" → ")}</small>}
+           </div>
+          </>}
          </div>
          <div className="composer">
           <textarea value={input} onChange={e=>setInput(e.target.value)}

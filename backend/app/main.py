@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth_routes import router as auth_router
 from app.api.error_handlers import register_exception_handlers
-from app.api.middleware import request_context_middleware
+from app.api.middleware import RequestContextMiddleware
 from app.api.routes import router
 from app.api.run_routes import router as run_router
 from app.api.tool_routes import router as tool_router
@@ -65,7 +65,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.middleware("http")(request_context_middleware)
+app.add_middleware(RequestContextMiddleware)
 register_exception_handlers(app)
 app.include_router(router)
 app.include_router(tool_router)

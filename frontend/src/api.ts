@@ -52,8 +52,7 @@ async function request<T>(path:string, init?:RequestInit):Promise<T>{
 }
 
 export const api={
- agents:()=>request<Page<Agent>>("/agents"),
- createAgent:(data:Pick<Agent,"name"|"description"|"system_prompt"|"model">)=>request<Agent>("/agents",{method:"POST",body:JSON.stringify(data)}),
+ agents:()=>request<Page<Agent>>("/agents"), createAgent:(data:Pick<Agent,"name"|"description"|"system_prompt"|"model">)=>request<Agent>("/agents",{method:"POST",body:JSON.stringify(data)}),
  conversations:(id:string)=>request<Page<Conversation>>(`/agents/${id}/conversations`),
  createConversation:(id:string)=>request<Conversation>(`/agents/${id}/conversations`,{method:"POST",body:JSON.stringify({title:"New conversation"})}),
  messages:(id:string)=>request<Page<Message>>(`/conversations/${id}/messages`),
@@ -78,3 +77,63 @@ export const api={
   request<Page<Run>>(`/runs?limit=${limit}${agentId?`&agent_id=${encodeURIComponent(agentId)}`:""}`),
  runEvents:(runId:string)=>request<Page<RunEvent>>(`/runs/${runId}/events?limit=100`),
 };
+
+/** 流式回调：服务端按 SSE 事件推送。 */
+export interface StreamHandlers {
+ onDelta?(text:string):void;
+ onToolCall?(tool:string):void;
+ onToolResult?(tool:string,status:string):void;
+ onCompleted?(payload:{run_id:string;user_message:Message;assistant_message:Message}):void;
+ onError?(code:string,message:string):void;
+}
+
+function handleSseChunk(chunk:string,handlers:StreamHandlers){
+ let event="message";
+ let data="";
+ for(const line of chunk.split("\n")){
+  if(line.startsWith("event:")) event=line.slice(6).trim();
+  else if(line.startsWith("data:")) data+=line.slice(5).trim();
+ }
+ if(!data) return;
+
+ let payload:Record<string,unknown>;
+ try{payload=JSON.parse(data) as Record<string,unknown>;}catch{return;}
+
+ if(event==="delta") handlers.onDelta?.(String(payload.text ?? ""));
+ else if(event==="tool.call") handlers.onToolCall?.(String(payload.tool ?? ""));
+ else if(event==="tool.result") handlers.onToolResult?.(String(payload.tool ?? ""),String(payload.status ?? ""));
+ else if(event==="completed") handlers.onCompleted?.(payload as never);
+ else if(event==="error") handlers.onError?.(String(payload.code ?? "error"),String(payload.message ?? ""));
+}
+
+/**
+ * 以 SSE 流式发送消息。
+ * 注意：这里不能用 EventSource（它只支持 GET 且不能带 Authorization 头），
+ * 因此用 fetch + ReadableStream 自己解析。
+ */
+export async function sendMessageStream(conversationId:string,content:string,handlers:StreamHandlers):Promise<void>{
+ const key = keyStore.get();
+ const res = await fetch(`${BASE}/conversations/${conversationId}/messages/stream`,{
+  method:"POST",
+  headers:{"Content-Type":"application/json",...(key ? {Authorization:`Bearer ${key}`} : {})},
+  body:JSON.stringify({content}),
+ });
+ if(!res.ok) throw new ApiError(await describeError(res), res.status);
+ if(!res.body) throw new ApiError("当前环境不支持流式响应",0);
+
+ const reader = res.body.getReader();
+ const decoder = new TextDecoder();
+ let buffer = "";
+ while(true){
+  const {done,value} = await reader.read();
+  if(done) break;
+  buffer += decoder.decode(value,{stream:true});
+  let boundary = buffer.indexOf("\n\n");
+  while(boundary >= 0){
+   handleSseChunk(buffer.slice(0,boundary),handlers);
+   buffer = buffer.slice(boundary+2);
+   boundary = buffer.indexOf("\n\n");
+  }
+ }
+ if(buffer.trim()) handleSseChunk(buffer,handlers);
+}

@@ -5,7 +5,7 @@ import json
 from app.core.config import settings
 from app.services import agent_runtime as agent_runtime_module
 from app.services.agent_runtime import max_iterations_message
-from app.services.model_gateway import ModelProvider, ModelReply, ToolCall
+from app.services.model_gateway import ModelProvider, ModelReply, StreamDone, ToolCall
 
 
 class ScriptedProvider(ModelProvider):
@@ -20,6 +20,10 @@ class ScriptedProvider(ModelProvider):
         if not self._replies:
             raise AssertionError("provider 调用次数超出脚本预期")
         return self._replies.pop(0)
+
+    async def stream(self, *, model, messages, tools=None):
+        reply = await self.generate(model=model, messages=messages, tools=tools)
+        yield StreamDone(reply=reply)
 
 
 def _use(monkeypatch, provider: ScriptedProvider) -> None:

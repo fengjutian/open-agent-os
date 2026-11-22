@@ -1,0 +1,41 @@
+{
+  "name": "tools",
+  "description": "工具治理：默认拒绝、显式放行后可执行",
+  "tools": [
+    {
+      "name": "echo",
+      "description": "回显传入的文本",
+      "input_schema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "未授权时工具被拒绝但运行继续",
+      "prompt": "帮我回显 hi",
+      "mock_tool_call": { "name": "echo", "arguments": { "text": "hi" } },
+      "final_reply": "工具没有被授权，我直接回答。",
+      "expect": {
+        "contains": ["直接回答"],
+        "run_status": "succeeded",
+        "min_tool_calls": 1
+      }
+    },
+    {
+      "name": "显式放行后工具可执行",
+      "prompt": "帮我回显 hi",
+      "allow_tools": ["echo"],
+      "mock_tool_call": { "name": "echo", "arguments": { "text": "hi" } },
+      "final_reply": "回显完成。",
+      "expect": {
+        "contains": ["回显完成"],
+        "run_status": "succeeded",
+        "min_tool_calls": 1
+      }
+    }
+  ]
+}

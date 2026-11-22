@@ -203,6 +203,24 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 
 `/health`、`/docs`、`/openapi.json` 为公开端点。
 
+### 流式（SSE）
+
+`POST /conversations/{id}/messages/stream`，`Content-Type: text/event-stream`。
+
+事件（每条为 `event: <name>` + `data: <json>`）：
+
+| event | data |
+|---|---|
+| `run.started` | `{ run_id }` |
+| `delta` | `{ text }` 增量文本 |
+| `tool.call` | `{ tool, arguments }` |
+| `tool.result` | `{ tool, status, error_code, result }` |
+| `completed` | `{ run_id, user_message, assistant_message }` |
+| `error` | `{ code, message }` |
+
+鉴权、配额与会话存在性在**建立流之前**校验，因此那几类失败仍是 401/403/404/429；
+一旦开始推送，后续错误只能以 `error` 事件表达（HTTP 状态已是 200）。
+
 ## 运行记录与限额
 
 - `GET /me`：当前身份（`key_id`、`name`、`role`、`permissions`），供前端决定显示哪些操作。

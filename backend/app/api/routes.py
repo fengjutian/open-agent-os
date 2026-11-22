@@ -2,16 +2,18 @@ import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_principal, require_permission
 from app.api.helpers import get_or_404
+from app.api.sse import sse_event
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
-from app.core.request_context import run_id_var
+from app.core.request_context import principal_key_id_var, request_id_var, run_id_var
 from app.core.security import READ, WRITE_AGENTS, Principal
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.entities import Agent, Conversation, Message
 from app.schemas.dto import (
     AgentCreate,
@@ -228,4 +230,70 @@ async def send_message(
         run_id=run_id,
         user_message=user_message,
         assistant_message=assistant_message,
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/stream",
+    responses={
+        **_MODEL_ERRORS,
+        200: {
+            "description": "SSE 事件流：run.started / delta / tool.call / tool.result / completed / error",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
+async def stream_message(
+    conversation_id: str,
+    payload: MessageCreate,
+    principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
+    """以 SSE 流式返回本次运行。
+
+    鉴权、配额、会话存在性在**建立流之前**校验，这样失败仍然是正常的 HTTP 错误码；
+    一旦开始推送，就只能用 `error` 事件告知客户端。
+    """
+    get_or_404(db, Conversation, conversation_id, "Conversation")
+    enforce_run_quota(db, principal.key_id)
+
+    run_id = f"run_{uuid4().hex}"
+    request_id = request_id_var.get()
+
+    async def event_stream():
+        run_token = run_id_var.set(run_id)
+        principal_token = principal_key_id_var.set(principal.key_id)
+        # 流式响应会超出请求依赖的生命周期，这里独立持有 session。
+        session = SessionLocal()
+        try:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                yield sse_event(
+                    {"type": "error", "code": ErrorCode.NOT_FOUND, "message": "Conversation not found"}
+                )
+                return
+
+            async for event in AgentRuntime().respond_stream(session, conversation, payload.content):
+                yield sse_event(event)
+        except Exception:
+            logger.exception("stream endpoint failed", extra={"fields": {"run_id": run_id}})
+            session.rollback()
+            yield sse_event(
+                {"type": "error", "code": ErrorCode.INTERNAL_ERROR, "message": "服务器内部错误"}
+            )
+        finally:
+            session.close()
+            principal_key_id_var.reset(principal_token)
+            run_id_var.reset(run_token)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # 关掉 nginx 等反向代理的响应缓冲，否则会攒够一批才吐给客户端。
+            "X-Accel-Buffering": "no",
+            "X-Request-ID": request_id,
+        },
     )

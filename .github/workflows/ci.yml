@@ -23,6 +23,8 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest
+      - name: Evaluation suites
+        run: python -m app.evals --suite evals/baseline.json --suite evals/tools.json --quiet
 
   frontend:
     runs-on: ubuntu-latest

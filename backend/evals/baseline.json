@@ -1,0 +1,36 @@
+{
+  "name": "baseline",
+  "description": "平台基础能力：回复落库、运行状态、不产生多余的工具调用",
+  "cases": [
+    {
+      "name": "简单问答",
+      "prompt": "你好，介绍一下你自己",
+      "mock_reply": "你好，我是评测用的 Agent。",
+      "expect": {
+        "contains": ["评测用的 Agent"],
+        "not_contains": ["Error", "Traceback"],
+        "run_status": "succeeded",
+        "max_tool_calls": 0
+      }
+    },
+    {
+      "name": "中文回复不丢字",
+      "prompt": "用一句话说明上下文窗口是什么",
+      "mock_reply": "上下文窗口是单次请求能携带的历史长度上限。",
+      "expect": {
+        "contains": ["上下文窗口", "上限"],
+        "run_status": "succeeded",
+        "max_tool_calls": 0
+      }
+    },
+    {
+      "name": "回复完整落库",
+      "prompt": "输出一个固定字符串",
+      "mock_reply": "FIXED_OUTPUT_1234",
+      "expect": {
+        "regex": "^FIXED_OUTPUT_\\d{4}$",
+        "run_status": "succeeded"
+      }
+    }
+  ]
+}

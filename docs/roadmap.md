@@ -13,7 +13,9 @@
 - ✅ Context Compaction（按字符预算丢弃最旧历史）
 - ✅ Run / RunEvent 持久化 + 事件流查询
 - ✅ 限流与每日运行配额
-- 待办：MCP、Skill System、Evaluation
+- ✅ SSE 流式输出
+- ✅ Evaluation（JSON 数据集 + 断言 + CLI，可进 CI）
+- 待办：MCP、Skill System
 
 ## V0.3 Execution
 - Rust Executor、Docker Sandbox
