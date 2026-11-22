@@ -17,6 +17,10 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     system_prompt: Mapped[str] = mapped_column(Text, default="You are a helpful assistant.")
     model: Mapped[str] = mapped_column(String(120), default="gpt-4o-mini")
+    # 引用的 Skill 名称列表。刻意用名称而不是外键：
+    # 运行时按名称解析、缺失或停用就跳过，避免改了技能就把历史 Agent 卡住。
+    # 代价是重命名技能会断引用，因此创建/更新时会校验名称必须存在。
+    skill_names: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     conversations: Mapped[list["Conversation"]] = relationship(
@@ -84,6 +88,24 @@ class RunEvent(Base):
     type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class Skill(Base):
+    """可复用的指令包。
+
+    一个 Skill 就是一段被命名的「行为约定」，可以被多个 Agent 引用。
+    注入点只有一处：拼上下文时并入 system prompt，因此同样受上下文预算约束。
+    """
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
 class ApiKey(Base):

@@ -16,7 +16,7 @@
 - ✅ SSE 流式输出
 - ✅ Evaluation（JSON 数据集 + 断言 + CLI，可进 CI）
 - ✅ MCP（stdio 客户端 + 同步 + 仍走治理链）
-- 待办：Skill System
+- ✅ Skill System（指令包 + 运行时注入 + 预算截断）
 
 ## V0.3 Execution
 - Rust Executor、Docker Sandbox

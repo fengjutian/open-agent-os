@@ -38,6 +38,13 @@
 只存哈希；`key_prefix` 仅用于列表展示辨识，不参与鉴权。角色是全局的，
 不做资源级授权，也没有组织/租户维度。
 
+## V0.2 技能
+- Skill：id、name（唯一）、description、instructions、enabled、created_at、updated_at。
+- Agent.skill_names：引用的技能名列表（JSON）。
+
+刻意用**名称**而不是外键：运行时按名称解析，缺失/停用就跳过，
+避免改了技能就把历史 Agent 卡住；代价是重命名会断引用，因此写入时校验存在性。
+
 ## 企业化扩展
 Organization、User、Membership、Role、Permission、ApiKey、AgentVersion、Run、RunEvent、
 Checkpoint、ExecutionArtifact、Secret。（ToolDefinition / PolicyRule / ToolInvocation /

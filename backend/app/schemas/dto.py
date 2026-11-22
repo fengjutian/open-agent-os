@@ -46,6 +46,8 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(default="You are a helpful assistant.", max_length=20000)
     # 省略时使用 settings.model_name，避免模型名在多处硬编码。
     model: str | None = Field(default=None, max_length=120)
+    # 引用的技能名，必须已存在
+    skill_names: list[str] = Field(default_factory=list, max_length=20)
 
 
 class AgentUpdate(BaseModel):
@@ -53,6 +55,7 @@ class AgentUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     system_prompt: str | None = Field(default=None, max_length=20000)
     model: str | None = Field(default=None, max_length=120)
+    skill_names: list[str] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> "AgentUpdate":
@@ -61,7 +64,7 @@ class AgentUpdate(BaseModel):
         否则 setattr 会把 None 写进 NOT NULL 列，触发 IntegrityError 的裸 500。
         description 列可空，显式传 null 用以清空，故不在此列。
         """
-        for field in ("name", "system_prompt", "model"):
+        for field in ("name", "system_prompt", "model", "skill_names"):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field} 不可为 null")
         return self
@@ -74,6 +77,7 @@ class AgentRead(BaseModel):
     description: str | None
     system_prompt: str
     model: str
+    skill_names: list[str]
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -317,3 +321,33 @@ class RunEventRead(BaseModel):
     type: str
     payload: dict[str, Any]
     created_at: UtcDatetime
+
+
+# ---------------------------------------------------------------------------
+# Skill
+# ---------------------------------------------------------------------------
+
+
+class SkillCreate(BaseModel):
+    # 复用工具名的字符集约束，保持命名一致
+    name: str = Field(min_length=2, max_length=64, pattern=TOOL_NAME_PATTERN)
+    description: str = Field(default="", max_length=2000)
+    instructions: str = Field(min_length=1, max_length=20000)
+    enabled: bool = True
+
+
+class SkillUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=2000)
+    instructions: str | None = Field(default=None, min_length=1, max_length=20000)
+    enabled: bool | None = None
+
+
+class SkillRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    description: str
+    instructions: str
+    enabled: bool
+    created_at: UtcDatetime
+    updated_at: UtcDatetime

@@ -299,6 +299,43 @@ MCP 本质是「借壳执行」：一条 `command` 就是一次任意进程启�
 - MCP stdio 规定 UTF-8。Windows 上 Python 子进程默认 cp936，会让中文内容变成
   乱码字节导致解析失败——客户端会给出「非 UTF-8 数据」的明确错误。
 
+## 技能（Skill）
+
+Skill 是**可复用的指令包**，一个技能可以挂到多个 Agent 上：
+
+```bash
+# 1. 建技能（需要 admin）
+curl -X POST localhost:8000/api/v1/skills -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d '{
+  "name": "polite",
+  "description": "礼貌应答",
+  "instructions": "回答时先打招呼，并在结尾询问是否还需要帮助。"
+}'
+
+# 2. 挂到 Agent 上（引用名称，创建/更新时校验必须存在）
+curl -X PATCH localhost:8000/api/v1/agents/<AGENT_ID> \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"skill_names": ["polite"]}'
+```
+
+运行时技能内容会被拼进 system prompt：
+
+```text
+<原始 system_prompt>
+
+## Skill: polite
+回答时先打招呼，并在结尾询问是否还需要帮助。
+```
+
+要点：
+
+- 技能内容计入 `SKILL_MAX_CHARS`（默认 8000），超预算截断并留标记，
+  不会把上下文预算吃光。
+- **缺失或停用的技能会被跳过而不是报错**——技能改动不会让历史 Agent 直接不可用；
+  实际生效的技能列表记录在 `run.started` 事件里，可回溯。
+- 只有 admin 能写技能（`write:skills`）；开发者可以引用已有技能。
+- Agent 按**名称**引用技能而不是外键：代价是重命名会断引用，因此写入时校验存在性。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL
@@ -356,6 +393,8 @@ REDIS_URL=redis://localhost:6379/0
 - PostgreSQL / SQLite 双支持（同一套迁移）
 - SSE 流式输出（前端增量渲染）
 - 评测与回归（JSON 数据集 + 断言 + CLI）
+- MCP 工具接入（stdio 客户端 + 同步 + 仍走治理链）
+- 技能系统（可复用指令包 + 运行时注入）
 - React 界面：对话、工具与策略、运行与审计三个视图
 
 ## 重要边界

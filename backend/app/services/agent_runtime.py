@@ -26,6 +26,7 @@ from app.services.model_gateway import (
 )
 from app.services.policy import PolicyEngine
 from app.services.runs import STATUS_RUNNING, RunRecorder, finalize_failure
+from app.services.skills import compose_system_prompt
 from app.services.tool_gateway import ToolCallOutcome, ToolGateway
 from app.services.tool_registry import ToolRegistry
 
@@ -263,11 +264,13 @@ class AgentRuntime:
         db.flush()
 
         recorder = RunRecorder(db, run)
+        system_prompt, applied_skills = compose_system_prompt(db, agent)
         recorder.event(
             "run.started",
             agent_id=agent.id,
             conversation_id=conversation.id,
             model=agent.model,
+            skills=applied_skills,
         )
 
         user_created_at = now_utc()
@@ -291,7 +294,7 @@ class AgentRuntime:
             if m.role in {"user", "assistant"}
         ]
 
-        context = build_messages(agent.system_prompt, history, settings.context_max_chars)
+        context = build_messages(system_prompt, history, settings.context_max_chars)
         if context.dropped_messages or context.truncated_newest:
             log_event(
                 logger,

@@ -29,6 +29,7 @@ from app.schemas.dto import (
 )
 from app.services.agent_runtime import AgentRuntime
 from app.services.rate_limit import enforce_run_quota
+from app.services.skills import assert_skills_exist
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ def create_agent(
     _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
     db: Session = Depends(get_db),
 ):
+    assert_skills_exist(db, payload.skill_names)
     data = payload.model_dump()
     data["model"] = data["model"] or settings.model_name
     item = Agent(**data)
@@ -98,6 +100,8 @@ def update_agent(
     db: Session = Depends(get_db),
 ):
     item = get_or_404(db, Agent, agent_id, "Agent")
+    if "skill_names" in payload.model_fields_set:
+        assert_skills_exist(db, payload.skill_names)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
     db.commit()

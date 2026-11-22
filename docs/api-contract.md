@@ -231,6 +231,19 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 - 注册 MCP 工具时，`config.server` 必须已在 `MCP_SERVERS` 中声明，否则 422；
   执行阶段若服务器已不存在，返回 `failed` + `tool_execution_failed`。
 
+### 技能
+
+- `POST /skills`：创建技能，body `{ name, description, instructions, enabled }`；
+  重名 409，名称或指令不合法 422。需要 `write:skills`（仅 admin）。
+- `GET /skills`：列表（分页，按名称排序）。
+- `GET /skills/{id}`：详情。
+- `PATCH /skills/{id}`：更新 `description` / `instructions` / `enabled`。
+- Agent 的 `skill_names` 引用已存在的技能名；引用了不存在的技能返回 422
+  且 `details.missing` 列出缺失项。
+
+运行时技能内容并入 system prompt，受 `SKILL_MAX_CHARS` 限制；停用或缺失的技能会被跳过，
+实际生效列表见 `run.started` 事件的 `skills` 字段。
+
 ## 运行记录与限额
 
 - `GET /me`：当前身份（`key_id`、`name`、`role`、`permissions`），供前端决定显示哪些操作。
