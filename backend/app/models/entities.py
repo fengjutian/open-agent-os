@@ -45,6 +45,47 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
+class Run(Base):
+    """一次 Agent 运行的主体记录。
+
+    run_id 就是这张表的主键；此前它只存在于日志里，现在可以按 id 回溯整条链路。
+    """
+
+    __tablename__ = "runs"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # 发起这次运行的 API Key，用于配额统计与追责
+    key_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    iterations: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_chars: Mapped[int] = mapped_column(Integer, default=0)
+    answer_chars: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RunEvent(Base):
+    """运行过程中的事件流（追加写，不修改）。
+
+    不建到 runs 的外键：与审计同一思路，事件记录的寿命不依赖业务数据的生命周期。
+    """
+
+    __tablename__ = "run_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    run_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class ApiKey(Base):
     """API 密钥。
 

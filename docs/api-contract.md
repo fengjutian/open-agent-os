@@ -64,6 +64,8 @@ Authorization: Bearer oak_xxxxxxxx
 | `not_found` | 404 | 资源不存在 |
 | `validation_error` | 422 | 请求体或查询参数校验失败（`details` 为字段级错误） |
 | `conflict` | 409 | 资源冲突（工具名重复、停用最后一个 admin 密钥等） |
+| `rate_limited` | 429 | 请求过于频繁（带 `Retry-After`） |
+| `quota_exceeded` | 429 | 24 小时内运行次数超限 |
 | `model_not_configured` | 424 | 缺少模型密钥等配置 |
 | `model_provider_error` | 502 / 504 | 模型服务错误或超时 |
 | `internal_error` | 500 | 未预期异常 |
@@ -201,6 +203,26 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 
 `/health`、`/docs`、`/openapi.json` 为公开端点。
 
+## 运行记录与限额
+
+- `GET /me`：当前身份（`key_id`、`name`、`role`、`permissions`），供前端决定显示哪些操作。
+- `GET /runs`：运行列表（分页），可按 `agent_id`、`conversation_id`、`status` 过滤。
+- `GET /runs/{run_id}`：单次运行详情。
+- `GET /runs/{run_id}/events`：事件流（按 `seq` 升序）。
+
+事件类型：`run.started`、`context.trimmed`、`model.request`、`model.response`、
+`tool.result`、`run.completed`、`run.failed`。
+
+### 限流与配额
+
+| 限制 | 配置 | 计数维度 | 超限 |
+|---|---|---|---|
+| 请求频率 | `RATE_LIMIT_PER_MINUTE`（默认 120） | 每个 API Key 每分钟 | 429 `rate_limited` + `Retry-After` |
+| 运行次数 | `DAILY_RUN_QUOTA`（默认 200） | 每个 API Key 每 24 小时 | 429 `quota_exceeded` |
+
+设为 `0` 即关闭对应限制。限流器是**进程内**滑动窗口，多副本部署需换 Redis；
+对外契约不变。失败的运行同样占用配额，避免靠制造失败绕过限额。
+
 ## 后续版本
 
-后续增加 SSE 事件流、Run/Event 持久化、幂等键与任务取消。
+后续增加 SSE 事件流、幂等键与任务取消。

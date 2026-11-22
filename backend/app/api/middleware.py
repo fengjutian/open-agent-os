@@ -11,7 +11,7 @@ from starlette.responses import Response
 
 from app.api.error_handlers import error_response
 from app.core.errors import ErrorCode
-from app.core.request_context import request_id_var, run_id_var
+from app.core.request_context import principal_key_id_var, request_id_var, run_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ async def request_context_middleware(request: Request, call_next) -> Response:
     request_id = request.headers.get("X-Request-ID") or f"req_{uuid4().hex}"
     request_token = request_id_var.set(request_id)
     run_token = run_id_var.set(None)
+    principal_token = principal_key_id_var.set(None)
     started = time.perf_counter()
 
     try:
@@ -55,5 +56,6 @@ async def request_context_middleware(request: Request, call_next) -> Response:
     )
 
     run_id_var.reset(run_token)
+    principal_key_id_var.reset(principal_token)
     request_id_var.reset(request_token)
     return response

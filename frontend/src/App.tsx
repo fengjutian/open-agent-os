@@ -1,10 +1,15 @@
 import {useCallback,useEffect,useState} from "react";
 import {ApiError,api,keyStore} from "./api";
-import type {Agent,Conversation,Message} from "./types";
+import {RunsPanel,ToolsPanel} from "./panels";
+import type {Agent,Conversation,Me,Message} from "./types";
+
+type View = "chat" | "tools" | "runs";
 
 export default function App(){
  const [apiKey,setApiKey]=useState(()=>keyStore.get());
  const [keyDraft,setKeyDraft]=useState("");
+ const [view,setView]=useState<View>("chat");
+ const [me,setMe]=useState<Me|null>(null);
  const [agents,setAgents]=useState<Agent[]>([]);
  const [agent,setAgent]=useState<Agent|null>(null);
  const [conversations,setConversations]=useState<Conversation[]>([]);
@@ -19,6 +24,7 @@ export default function App(){
   if(err instanceof ApiError && err.status===401){
    keyStore.set("");
    setApiKey("");
+   setMe(null);
    setError("API Key 无效或已停用，请重新输入。");
    return;
   }
@@ -33,7 +39,11 @@ export default function App(){
   }catch(err){handleError(err);}
  },[handleError]);
 
- useEffect(()=>{if(apiKey) refresh();},[apiKey,refresh]);
+ useEffect(()=>{
+  if(!apiKey) return;
+  refresh();
+  api.me().then(setMe).catch(handleError);
+ },[apiKey,refresh,handleError]);
 
  useEffect(()=>{
   if(!agent) return;
@@ -60,6 +70,7 @@ export default function App(){
    const page=await api.agents();
    setAgents(page.items);
    setAgent(created);
+   setView("chat");
   }catch(err){handleError(err);}
  }
 
@@ -100,10 +111,12 @@ export default function App(){
  function signOut(){
   keyStore.set("");
   setApiKey("");
+  setMe(null);
   setAgents([]);
   setAgent(null);
   setConversation(null);
   setMessages([]);
+  setView("chat");
  }
 
  if(!apiKey){
@@ -124,27 +137,49 @@ export default function App(){
  }
 
  const activeAgent=agent;
+ const title=view==="chat"
+  ? (activeAgent?.name ?? "欢迎使用 Agent Platform")
+  : view==="tools" ? "工具与策略" : "运行与审计";
+
  return <div className="shell">
   <aside className="sidebar">
    <div className="brand"><b>A</b><span><strong>Agent Platform</strong><small>Enterprise Workspace</small></span></div>
+
+   <nav className="nav">
+    <button className={view==="chat"?"active":""} onClick={()=>setView("chat")}>对话</button>
+    <button className={view==="tools"?"active":""} onClick={()=>setView("tools")}>工具</button>
+    <button className={view==="runs"?"active":""} onClick={()=>setView("runs")}>运行</button>
+   </nav>
+
    <div className="label">AGENTS <button onClick={addAgent}>＋</button></div>
-   {agents.map(item=><button key={item.id} className={`agent ${activeAgent?.id===item.id?"active":""}`} onClick={()=>setAgent(item)}>
+   {agents.map(item=><button key={item.id} className={`agent ${activeAgent?.id===item.id?"active":""}`}
+    onClick={()=>{setAgent(item);setView("chat");}}>
     <i>{item.name[0]?.toUpperCase()}</i>
     <span><strong>{item.name}</strong><small>{item.model}</small></span>
    </button>)}
    {!agents.length&&<p className="muted">点击 + 创建第一个 Agent</p>}
-   <footer><button className="link" onClick={signOut}>切换 API Key</button></footer>
+
+   <footer>
+    <span className="role-badge">{me?`${me.role} · ${me.name}`:"—"}</span>
+    <button className="link" onClick={signOut}>切换 API Key</button>
+   </footer>
   </aside>
+
   <main>
    <header>
-    <div><small>WORKSPACE / AGENTS</small><h1>{activeAgent?.name ?? "欢迎使用 Agent Platform"}</h1></div>
-    {activeAgent&&<button className="primary" onClick={addConversation}>新建会话</button>}
+    <div><small>WORKSPACE / {view.toUpperCase()}</small><h1>{title}</h1></div>
+    {view==="chat"&&activeAgent&&<button className="primary" onClick={addConversation}>新建会话</button>}
    </header>
-   <div className="layout">
+
+   {view==="tools"&&<ToolsPanel agents={agents} me={me} onError={handleError}/>}
+   {view==="runs"&&<RunsPanel agents={agents} onError={handleError}/>}
+
+   {view==="chat"&&<div className="layout">
     <section className="sessions">
      <h3>会话</h3>
      <p className="muted">选择会话开始协作</p>
-     {conversations.map(item=><button key={item.id} className={`session ${conversation?.id===item.id?"active":""}`} onClick={()=>openConversation(item)}>◷　{item.title}</button>)}
+     {conversations.map(item=><button key={item.id} className={`session ${conversation?.id===item.id?"active":""}`}
+      onClick={()=>openConversation(item)}>◷　{item.title}</button>)}
     </section>
     <section className="chat">
      {!conversation
@@ -178,8 +213,9 @@ export default function App(){
         </>
      }
     </section>
-   </div>
+   </div>}
   </main>
+
   {error&&<button className="error" onClick={()=>setError("")}>{error} ×</button>}
  </div>;
 }

@@ -1,4 +1,4 @@
-import type {Agent,Conversation,Message,Page,SendMessageResponse} from "./types";
+import type {Agent,AgentTool,AuditLog,Conversation,Me,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -58,4 +58,23 @@ export const api={
  createConversation:(id:string)=>request<Conversation>(`/agents/${id}/conversations`,{method:"POST",body:JSON.stringify({title:"New conversation"})}),
  messages:(id:string)=>request<Page<Message>>(`/conversations/${id}/messages`),
  sendMessage:(id:string,content:string)=>request<SendMessageResponse>(`/conversations/${id}/messages`,{method:"POST",body:JSON.stringify({content})}),
+
+ me:()=>request<Me>("/me"),
+
+ tools:()=>request<Page<Tool>>("/tools"),
+ createTool:(data:{name:string;description?:string;input_schema?:Record<string,unknown>;execution_type?:"builtin"|"executor"})=>
+  request<Tool>("/tools",{method:"POST",body:JSON.stringify(data)}),
+ updateTool:(id:string,patch:{enabled?:boolean;description?:string})=>
+  request<Tool>(`/tools/${id}`,{method:"PATCH",body:JSON.stringify(patch)}),
+ agentTools:(agentId:string)=>request<Page<AgentTool>>(`/agents/${agentId}/tools`),
+
+ policyRules:(agentId:string)=>request<Page<PolicyRule>>(`/policy-rules?agent_id=${encodeURIComponent(agentId)}`),
+ createPolicyRule:(data:{agent_id:string|null;tool_name:string;effect:"allow"|"deny";priority?:number})=>
+  request<PolicyRule>("/policy-rules",{method:"POST",body:JSON.stringify(data)}),
+
+ auditLogs:(limit=20)=>request<Page<AuditLog>>(`/audit-logs?limit=${limit}`),
+
+ runs:(agentId?:string,limit=20)=>
+  request<Page<Run>>(`/runs?limit=${limit}${agentId?`&agent_id=${encodeURIComponent(agentId)}`:""}`),
+ runEvents:(runId:string)=>request<Page<RunEvent>>(`/runs/${runId}/events?limit=100`),
 };

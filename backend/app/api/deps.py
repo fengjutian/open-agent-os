@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.request_context import principal_key_id_var
 from app.core.security import ANONYMOUS_ADMIN, Principal
 from app.db.session import get_db
 from app.services.api_keys import ApiKeyService
+from app.services.rate_limit import enforce_rate_limit
 
 
 def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None:
@@ -27,21 +29,26 @@ async def get_principal(
     x_api_key: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> Principal:
-    """解析请求身份。认证关闭时退化为匿名管理员（仅限本地开发）。"""
+    """解析请求身份，并做每密钥的请求限流。认证关闭时退化为匿名管理员（仅限本地开发）。"""
     if not settings.auth_enabled:
-        return ANONYMOUS_ADMIN
+        principal = ANONYMOUS_ADMIN
+    else:
+        raw = _extract_key(authorization, x_api_key)
+        if raw is None:
+            raise AppError(
+                ErrorCode.UNAUTHORIZED,
+                "缺少 API Key：请使用 Authorization: Bearer <key> 或 X-API-Key 头",
+                status_code=401,
+            )
 
-    raw = _extract_key(authorization, x_api_key)
-    if raw is None:
-        raise AppError(
-            ErrorCode.UNAUTHORIZED,
-            "缺少 API Key：请使用 Authorization: Bearer <key> 或 X-API-Key 头",
-            status_code=401,
-        )
+        authenticated = ApiKeyService(db).authenticate(raw)
+        if authenticated is None:
+            raise AppError(ErrorCode.UNAUTHORIZED, "API Key 无效或已停用", status_code=401)
+        principal = authenticated
 
-    principal = ApiKeyService(db).authenticate(raw)
-    if principal is None:
-        raise AppError(ErrorCode.UNAUTHORIZED, "API Key 无效或已停用", status_code=401)
+    # 认证通过后才限流：拿不到身份的请求没必要占用桶。
+    enforce_rate_limit(principal.key_id)
+    principal_key_id_var.set(principal.key_id)
     return principal
 
 

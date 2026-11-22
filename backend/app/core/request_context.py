@@ -11,3 +11,6 @@ request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
 # 每次 Agent 运行（一次 respond 调用）一个；后续 V0.2 的 Run/Event 持久化会复用它。
 run_id_var: ContextVar[str | None] = ContextVar("run_id", default=None)
+
+# 当前请求的操作主体（API Key id）。由鉴权依赖写入，供 Run/审计使用。
+principal_key_id_var: ContextVar[str | None] = ContextVar("principal_key_id", default=None)

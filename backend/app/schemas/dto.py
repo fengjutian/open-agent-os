@@ -263,3 +263,45 @@ class ApiKeyCreated(ApiKeyRead):
     """创建响应：明文密钥只在这里出现一次。"""
 
     api_key: str
+
+
+class MeRead(BaseModel):
+    """当前身份，供前端决定显示哪些操作（真正的校验仍在服务端）。"""
+
+    key_id: str
+    name: str
+    role: str
+    permissions: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Run / RunEvent
+# ---------------------------------------------------------------------------
+
+
+class RunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str | None
+    conversation_id: str | None
+    key_id: str | None
+    status: str
+    model: str | None
+    iterations: int
+    tool_calls: int
+    prompt_chars: int
+    answer_chars: int
+    error_code: str | None
+    error_message: str | None
+    started_at: UtcDatetime
+    finished_at: UtcDatetime | None
+
+
+class RunEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    run_id: str
+    seq: int
+    type: str
+    payload: dict[str, Any]
+    created_at: UtcDatetime

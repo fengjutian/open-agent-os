@@ -50,16 +50,14 @@ def error_response(
     code: str,
     message: str,
     details: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = request_id_var.get()
     error: dict[str, Any] = {"code": code, "message": message, "request_id": request_id}
     if details is not None:
         error["details"] = details
-    return JSONResponse(
-        status_code=status_code,
-        content={"error": error},
-        headers={"X-Request-ID": request_id},
-    )
+    merged = {"X-Request-ID": request_id, **(headers or {})}
+    return JSONResponse(status_code=status_code, content={"error": error}, headers=merged)
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
@@ -74,7 +72,7 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
             }
         },
     )
-    return error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:

@@ -26,6 +26,7 @@ from app.schemas.dto import (
     SendMessageResponse,
 )
 from app.services.agent_runtime import AgentRuntime
+from app.services.rate_limit import enforce_run_quota
 
 logger = logging.getLogger(__name__)
 
@@ -202,10 +203,12 @@ def list_messages(
 async def send_message(
     conversation_id: str,
     payload: MessageCreate,
-    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    principal: Principal = Depends(require_permission(WRITE_AGENTS)),
     db: Session = Depends(get_db),
 ):
     conversation = get_or_404(db, Conversation, conversation_id, "Conversation")
+    # 配额按密钥统计，避免单个 developer 无限制地消耗模型调用。
+    enforce_run_quota(db, principal.key_id)
 
     run_id = f"run_{uuid4().hex}"
     token = run_id_var.set(run_id)

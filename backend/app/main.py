@@ -8,6 +8,7 @@ from app.api.auth_routes import router as auth_router
 from app.api.error_handlers import register_exception_handlers
 from app.api.middleware import request_context_middleware
 from app.api.routes import router
+from app.api.run_routes import router as run_router
 from app.api.tool_routes import router as tool_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -69,6 +70,7 @@ register_exception_handlers(app)
 app.include_router(router)
 app.include_router(tool_router)
 app.include_router(auth_router)
+app.include_router(run_router)
 
 
 @app.get("/health")

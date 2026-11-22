@@ -18,6 +18,15 @@
 
 关系：Agent 1:N PolicyRule（agent_id 为空则是全局规则）。
 
+## V0.2 运行时
+- Run：id（即 run_id）、agent_id、conversation_id、key_id、status、model、iterations、tool_calls、prompt_chars、answer_chars、error_code、error_message、started_at、finished_at。
+- RunEvent：id、run_id、seq、type、payload（JSON）、created_at。追加写，不改。
+
+`seq` 在单次运行内严格递增，便于还原执行顺序。事件类型：
+`run.started`、`context.trimmed`、`model.request`、`model.response`、`tool.result`、`run.completed`、`run.failed`。
+
+同样不建外键：事件寿命不依赖业务数据生命周期。
+
 ## V0.2 认证
 - ApiKey：id、name（唯一）、key_prefix、key_hash（SHA-256，唯一索引）、role、enabled、created_at、last_used_at。
 

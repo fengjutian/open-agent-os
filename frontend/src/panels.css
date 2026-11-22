@@ -1,0 +1,106 @@
+/* 工具面板与运行面板所需的样式，叠加在 style.css 之上。 */
+
+.nav{display:flex;gap:6px;margin:0 6px 18px}
+
+.nav button{
+ flex:1;
+ background:transparent;
+ border:1px solid #243147;
+ color:#8290a5;
+ border-radius:7px;
+ padding:7px 0;
+ font-size:11px;
+ cursor:pointer;
+}
+
+.nav button.active{background:#1b2b45;border-color:#31496d;color:#dce5f3}
+
+.panel-layout{padding:20px;align-items:start}
+
+.panel-body{padding:16px 20px;overflow:auto}
+
+.panel-body h3{margin:18px 0 8px;font-size:11px;letter-spacing:1px;color:#8290a5}
+
+.stack{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+
+.field{
+ width:100%;
+ padding:8px 10px;
+ border-radius:7px;
+ border:1px solid #31496d;
+ background:#0d1522;
+ color:#e7edf7;
+ font-size:12px;
+}
+
+.field:focus{outline:none;border-color:#6689f7}
+
+.mono{
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+ font-size:11px;
+ line-height:1.5;
+ resize:vertical;
+}
+
+.row{
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+ padding:7px 6px;
+ border-bottom:1px solid #1b2536;
+}
+
+.row b{display:block;font-size:12px}
+
+.row small{display:block;font-size:10px;margin-top:2px}
+
+.ghost{
+ background:#1d2c43;
+ color:#dce5f3;
+ border:1px solid #31496d;
+ border-radius:6px;
+ padding:5px 9px;
+ font-size:11px;
+ cursor:pointer;
+}
+
+.ghost:disabled{opacity:.45;cursor:not-allowed}
+
+.table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+
+.table th{
+ text-align:left;
+ font-weight:500;
+ font-size:10px;
+ letter-spacing:1px;
+ color:#8290a5;
+ padding:6px 8px;
+ border-bottom:1px solid #243147;
+}
+
+.table td{padding:7px 8px;border-bottom:1px solid #1b2536;vertical-align:top}
+
+.actions{display:flex;gap:6px;white-space:nowrap}
+
+.ok{color:#4ade80}
+
+.no{color:#f87171}
+
+.small{font-size:10px}
+
+.feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+
+.feed li{font-size:12px;color:#c7d3e4}
+
+.feed code{color:#8ba7d8}
+
+.payload{
+ margin:4px 0 0;
+ font-size:10px;
+ color:#8290a5;
+ white-space:pre-wrap;
+ word-break:break-all;
+}
+
+.role-badge{display:block;font-size:10px;color:#8290a5;margin-bottom:6px}

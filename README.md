@@ -180,6 +180,44 @@ curl -X POST localhost:8000/api/v1/policy-rules -H "Authorization: Bearer $API_K
 
 接口与状态码见 [docs/api-contract.md](docs/api-contract.md)。
 
+## 运行记录与事件流
+
+每次发消息都会创建一条 `Run`（主键就是返回给客户端的 `run_id`），并追加事件：
+
+```text
+run.started → model.request → model.response → [tool.result …] → run.completed
+```
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/runs
+curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/runs/<RUN_ID>
+curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/runs/<RUN_ID>/events
+```
+
+Run 上记录了 `iterations`、`tool_calls`、`prompt_chars`、`answer_chars`、`status` 与错误码；
+失败运行同样落库（`status=failed` + `run.failed` 事件），不会被静默丢弃。
+
+## 限流与配额
+
+| 限制 | 环境变量 | 默认 | 计数维度 |
+|---|---|---|---|
+| 请求频率 | `RATE_LIMIT_PER_MINUTE` | 120 | 每个 API Key 每分钟 |
+| 运行次数 | `DAILY_RUN_QUOTA` | 200 | 每个 API Key 每 24 小时 |
+
+超限返回 429，错误码分别是 `rate_limited` 与 `quota_exceeded`，并带 `Retry-After`。
+设为 `0` 表示关闭。限流器是进程内实现，多副本部署需换 Redis。
+
+## 前端界面
+
+左栏三个视图，按当前角色的权限自动禁用无权操作（服务端仍然会再次校验）：
+
+- **对话**：Agent / 会话 / 消息。
+- **工具**：注册工具、启停工具、按 Agent 维护 allow/deny 策略、查看最近审计。
+- **运行**：运行列表 + 事件流详情。
+
+打开 http://localhost:5173 会先要求输入 API Key（存在浏览器本地）。
+
+
 ## 依赖锁定
 
 - 前端：`package.json` 使用精确版本，`package-lock.json` 已提交，CI/镜像用 `npm ci`。
@@ -199,7 +237,9 @@ curl -X POST localhost:8000/api/v1/policy-rules -H "Authorization: Bearer $API_K
 - 工具注册表 + JSON Schema 校验 + 服务端策略（deny-by-default）+ 审计
 - Agent Loop 工具调用（轮次上限可配）
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
-- React Agent 管理和聊天界面（含 API Key 准入）
+- Run / RunEvent 持久化与事件流查询
+- 每密钥限流与每日运行配额
+- React 界面：对话、工具与策略、运行与审计三个视图
 
 ## 重要边界
 V0.2 不执行任意 Shell / Python / Node 代码。已有 API Key 认证与三角色 RBAC，

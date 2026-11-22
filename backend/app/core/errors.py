@@ -17,6 +17,8 @@ class ErrorCode:
     CONFLICT = "conflict"
     UNAUTHORIZED = "unauthorized"
     FORBIDDEN = "forbidden"
+    RATE_LIMITED = "rate_limited"
+    QUOTA_EXCEEDED = "quota_exceeded"
     MODEL_NOT_CONFIGURED = "model_not_configured"
     MODEL_PROVIDER_ERROR = "model_provider_error"
     INTERNAL_ERROR = "internal_error"
@@ -41,9 +43,12 @@ class AppError(Exception):
         *,
         status_code: int = 400,
         details: Any = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details
+        # 例如 429 的 Retry-After
+        self.headers = headers

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
     # 首次启动时用于引导管理员密钥；留空则自动生成并在日志中打印一次。
     bootstrap_admin_api_key: str = ""
+    # 每个密钥每分钟允许的请求数；0 表示不限流。
+    rate_limit_per_minute: int = 120
+    # 每个密钥 24 小时内允许发起的 Agent 运行数；0 表示不限额。
+    daily_run_quota: int = 200
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

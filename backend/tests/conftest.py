@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.api_keys import ApiKeyService  # noqa: E402
+from app.services.rate_limit import reset_rate_limiter  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -70,8 +71,10 @@ def admin_auth(client, clean_tables):
     认证默认开启，所有既有用例都必须带凭据；每个用例发一把新密钥，
     因为 clean_tables 会清空 api_keys 表。
     """
+    reset_rate_limiter()
     client.headers["Authorization"] = f"Bearer {_create_key('admin')}"
     yield
+    reset_rate_limiter()
 
 
 @pytest.fixture

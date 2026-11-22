@@ -11,7 +11,9 @@
 - ✅ Tool Registry、JSON Schema 校验、Policy Engine（deny-by-default）
 - ✅ Tool Call Loop（轮次上限 4）、审计事件与工具调用记录
 - ✅ Context Compaction（按字符预算丢弃最旧历史）
-- 待办：MCP、Skill System、Run / Event 持久化、Evaluation
+- ✅ Run / RunEvent 持久化 + 事件流查询
+- ✅ 限流与每日运行配额
+- 待办：MCP、Skill System、Evaluation
 
 ## V0.3 Execution
 - Rust Executor、Docker Sandbox
