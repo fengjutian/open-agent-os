@@ -129,7 +129,10 @@ class ToolCreate(BaseModel):
     input_schema: dict[str, Any] = Field(default_factory=_empty_object_schema)
     permissions: list[str] = Field(default_factory=list, max_length=20)
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
-    execution_type: Literal["builtin", "executor"] = "builtin"
+    execution_type: Literal["builtin", "mcp", "executor"] = "builtin"
+    # execution_type=mcp 时形如 {"server": "echo", "tool": "echo"}；
+    # 只能引用 MCP_SERVERS 里声明过的服务器名。
+    config: dict[str, Any] | None = None
     enabled: bool = True
 
 
@@ -149,9 +152,18 @@ class ToolRead(BaseModel):
     permissions: list[str]
     timeout_seconds: float
     execution_type: str
+    config: dict[str, Any] | None = None
     enabled: bool
     created_at: UtcDatetime
     updated_at: UtcDatetime
+
+
+class McpSyncResult(BaseModel):
+    """同步 MCP 服务器的结果：注册成功的工具与跳过的原因。"""
+
+    server: str
+    registered: list[ToolRead] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
 
 
 class PolicyRuleCreate(BaseModel):

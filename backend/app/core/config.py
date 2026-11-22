@@ -1,4 +1,19 @@
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class McpServerConfig(BaseModel):
+    """一个 MCP stdio 服务器的启动方式。
+
+    注意：MCP 服务器**只能**在这里配置（环境变量），不能通过 API 注册。
+    否则拥有 write:tools 的管理员就能借「注册工具」执行任意二进制。
+    数据库里的 ToolDefinition 只通过 `config.server` 引用这里的名字。
+    """
+
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = 10.0
 
 
 class Settings(BaseSettings):
@@ -27,6 +42,10 @@ class Settings(BaseSettings):
     redis_url: str = ""
     # 每个密钥 24 小时内允许发起的 Agent 运行数；0 表示不限额。
     daily_run_quota: int = 200
+    # MCP 服务器清单，形如 MCP_SERVERS='{"echo": {"command": "python", "args": ["-m", "srv"]}}'
+    mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
+    # 单次 MCP 调用允许的最长等待（秒），与工具自身的 timeout 取较小值。
+    mcp_timeout_seconds: float = 30.0
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

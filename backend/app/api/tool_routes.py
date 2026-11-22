@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, status
@@ -15,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_principal, principal_actor, require_permission
 from app.api.helpers import count_rows, get_or_404
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.request_context import run_id_var
 from app.core.security import INVOKE_TOOLS, READ, WRITE_POLICY, WRITE_TOOLS, Principal
@@ -24,6 +28,7 @@ from app.schemas.dto import (
     AgentToolRead,
     AuditLogRead,
     ErrorEnvelope,
+    McpSyncResult,
     Page,
     PolicyRuleCreate,
     PolicyRuleRead,
@@ -35,6 +40,7 @@ from app.schemas.dto import (
     ToolUpdate,
 )
 from app.services.audit import AuditService
+from app.services.mcp_client import McpError, McpStdioClient
 from app.services.policy import PolicyEngine
 from app.services.tool_gateway import ToolGateway
 from app.services.tool_registry import ToolRegistry, assert_valid_schema
@@ -62,6 +68,36 @@ router = APIRouter(prefix="/api/v1", tags=["tools"], dependencies=[Depends(get_p
 # ---------------------------------------------------------------------------
 
 
+def _assert_mcp_config(payload: ToolCreate) -> None:
+    """MCP 工具必须引用运维声明过的服务器，不能自带命令行。"""
+    if payload.execution_type != "mcp":
+        return
+
+    config = payload.config or {}
+    server_name = config.get("server")
+    if not server_name:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "execution_type=mcp 时必须提供 config.server",
+            status_code=422,
+        )
+    if server_name not in settings.mcp_servers:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"MCP 服务器 {server_name} 未在 MCP_SERVERS 中声明（只能由运维通过环境变量配置）",
+            status_code=422,
+        )
+
+
+def mcp_tool_name(server_name: str, remote_name: str) -> str:
+    """把「服务器名 + 远程工具名」压成合法的本地工具名。"""
+    raw = f"{server_name}.{remote_name}".lower()
+    cleaned = re.sub(r"[^a-z0-9_.-]", "-", raw).strip("-.")
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = f"mcp-{cleaned}"
+    return cleaned[:64]
+
+
 @router.post("/tools", response_model=ToolRead, status_code=status.HTTP_201_CREATED, responses=_TOOL_ERRORS)
 def create_tool(
     payload: ToolCreate,
@@ -74,6 +110,7 @@ def create_tool(
 
     # 注册时就校验 schema 本身合法，避免把坏契约存进库。
     assert_valid_schema(payload.input_schema)
+    _assert_mcp_config(payload)
 
     tool = ToolDefinition(**payload.model_dump())
     db.add(tool)
@@ -348,3 +385,82 @@ def list_audit_logs(
         statement.order_by(AuditLog.created_at.desc(), AuditLog.id).limit(limit).offset(offset)
     ).all()
     return Page[AuditLogRead](items=items, total=total, limit=limit, offset=offset)
+
+
+# ---------------------------------------------------------------------------
+# MCP
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/mcp/servers/{server_name}/sync",
+    response_model=McpSyncResult,
+    responses=_TOOL_ERRORS,
+)
+async def sync_mcp_server(
+    server_name: str,
+    principal: Principal = Depends(require_permission(WRITE_TOOLS)),
+    db: Session = Depends(get_db),
+):
+    """把某个 MCP 服务器上的工具同步进注册表。
+
+    同步进来的工具依然完整走「注册表 → Schema → Policy → 审计 → 执行」，
+    而且 MCP 服务器本身只能由运维在 `MCP_SERVERS` 里声明。
+    """
+    server = settings.mcp_servers.get(server_name)
+    if server is None:
+        raise AppError(ErrorCode.NOT_FOUND, f"MCP 服务器 {server_name} 未配置", status_code=404)
+
+    timeout = min(settings.mcp_timeout_seconds, server.timeout_seconds)
+    client = McpStdioClient(
+        command=server.command, args=server.args, env=server.env, timeout=timeout
+    )
+    try:
+        await asyncio.wait_for(client.start(), timeout=timeout)
+        remote_tools = await asyncio.wait_for(client.list_tools(), timeout=timeout)
+    except TimeoutError as exc:
+        raise AppError(ErrorCode.TOOL_TIMEOUT, "列举 MCP 工具超时", status_code=504) from exc
+    except McpError as exc:
+        raise AppError(
+            ErrorCode.MCP_ERROR, f"连接 MCP 服务器失败：{exc.message}", status_code=502
+        ) from exc
+    finally:
+        with contextlib.suppress(Exception):
+            await asyncio.shield(client.close())
+
+    registry = ToolRegistry(db)
+    audit = AuditService(db)
+    result = McpSyncResult(server=server_name)
+    pending: list[ToolDefinition] = []
+
+    for remote in remote_tools:
+        name = mcp_tool_name(server_name, remote.name)
+        try:
+            assert_valid_schema(remote.input_schema)
+        except AppError as exc:
+            result.skipped.append(f"{remote.name}: {exc.message}")
+            continue
+
+        tool = registry.get_by_name(name)
+        action = "tool.update" if tool is not None else "tool.register"
+        if tool is None:
+            tool = ToolDefinition(name=name)
+            db.add(tool)
+
+        tool.description = remote.description
+        tool.input_schema = remote.input_schema
+        tool.execution_type = "mcp"
+        tool.config = {"server": server_name, "tool": remote.name}
+        audit.record(
+            action=action,
+            actor=principal_actor(principal),
+            resource=f"tool:{name}",
+            decision="allow",
+            reason=f"同步 MCP 服务器 {server_name}",
+            detail={"server": server_name, "remote_tool": remote.name},
+        )
+        pending.append(tool)
+
+    db.commit()
+    result.registered = [ToolRead.model_validate(tool) for tool in pending]
+    return result

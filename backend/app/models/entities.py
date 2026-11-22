@@ -121,8 +121,12 @@ class ToolDefinition(Base):
     # 该工具声明的权限标记，供策略与审计使用（例如 "read:time"）。
     permissions: Mapped[list] = mapped_column(JSON, default=list)
     timeout_seconds: Mapped[float] = mapped_column(Float, default=10.0)
-    # builtin：平台内建的确定性实现；executor：（V0.3）交给隔离执行器，当前一律拒绝。
+    # builtin：平台内建的确定性实现；mcp：转发给已配置的 MCP 服务器；
+    # executor：（V0.3）交给隔离执行器，当前一律拒绝。
     execution_type: Mapped[str] = mapped_column(String(20), default="builtin")
+    # execution_type=mcp 时形如 {"server": "echo", "tool": "echo"}。
+    # 只允许引用 settings.mcp_servers 里声明过的服务器名，不允许携带命令行。
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

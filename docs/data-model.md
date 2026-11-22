@@ -8,7 +8,12 @@
 关系：Agent 1:N Conversation；Conversation 1:N Message。
 
 ## V0.2 工具治理
-- ToolDefinition：id、name（唯一）、description、input_schema（JSON Schema）、permissions、timeout_seconds、execution_type、enabled、created_at、updated_at。
+- ToolDefinition：id、name（唯一）、description、input_schema（JSON Schema）、permissions、timeout_seconds、execution_type、config、enabled、created_at、updated_at。
+
+`execution_type`：`builtin`（平台内建实现）/ `mcp`（转发已声明的 MCP 服务器）/
+`executor`（V0.3，当前拒绝）。`config` 在 MCP 场景下形如
+`{"server": "<已声明的服务器名>", "tool": "<远程工具名>"}`——只存服务器名，
+启动命令留在环境变量里。
 - PolicyRule：id、agent_id（可空=全局）、tool_name（或 `*`）、effect（allow/deny）、priority、enabled、note、created_at。
 - ToolInvocation：id、run_id、agent_id、conversation_id、tool_name、arguments、result、status、error_code、error_message、started_at、finished_at。
 - AuditLog：id、run_id、request_id、actor、action、resource、decision、reason、detail、created_at。

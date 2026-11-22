@@ -262,6 +262,43 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 打开 http://localhost:5173 会先要求输入 API Key（存在浏览器本地）。
 
 
+## MCP 工具（V0.2）
+
+MCP 服务器**只能由运维通过环境变量声明**，API 无法注册：
+
+```bash
+MCP_SERVERS='{"echo": {"command": "python", "args": ["path/to/server.py"]}}'
+```
+
+声明的服务器可以被同步进工具注册表：
+
+```bash
+curl -X POST localhost:8000/api/v1/mcp/servers/echo/sync -H "Authorization: Bearer $API_KEY"
+# => {"server":"echo","registered":[{...}],"skipped":["broken_schema: ..."]}
+```
+
+同步进来的工具形如 `echo.echo`（`服务器名.远程工具名`），`execution_type=mcp`，
+`config={"server":"echo","tool":"echo"}`。它们**仍然完整走治理链**：
+
+```text
+Tool Registry → JSON Schema → Policy → Audit → 执行（通过 stdio 调用 MCP 服务器）
+```
+
+所以 MCP 工具默认也是拒绝的，必须显式加 allow 规则。
+
+### 为什么命令行只能放环境变量
+
+MCP 本质是「借壳执行」：一条 `command` 就是一次任意进程启动。如果允许通过
+`POST /tools` 写入 command，那么拿到 `write:tools` 的管理员就等于拿到任意代码执行。
+所以数据库里只保存**服务器名**，真正的启动参数留在运维手里。
+
+### 两个实现细节
+
+- 每次调用起一个 MCP 进程、用完即关（进程池是后续优化）；客户端读超时故意比整体
+  预算宽松，让外层超时稳定映射成 `tool_timeout` 而不是随机的读超时。
+- MCP stdio 规定 UTF-8。Windows 上 Python 子进程默认 cp936，会让中文内容变成
+  乱码字节导致解析失败——客户端会给出「非 UTF-8 数据」的明确错误。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL

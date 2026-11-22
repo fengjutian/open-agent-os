@@ -31,6 +31,7 @@ class ErrorCode:
     TOOL_EXECUTION_FAILED = "tool_execution_failed"
     TOOL_TIMEOUT = "tool_timeout"
     EXECUTOR_NOT_AVAILABLE = "executor_not_available"
+    MCP_ERROR = "mcp_error"
 
 
 class AppError(Exception):

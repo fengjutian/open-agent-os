@@ -15,7 +15,8 @@
 - ✅ 限流与每日运行配额
 - ✅ SSE 流式输出
 - ✅ Evaluation（JSON 数据集 + 断言 + CLI，可进 CI）
-- 待办：MCP、Skill System
+- ✅ MCP（stdio 客户端 + 同步 + 仍走治理链）
+- 待办：Skill System
 
 ## V0.3 Execution
 - Rust Executor、Docker Sandbox

@@ -221,6 +221,16 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 鉴权、配额与会话存在性在**建立流之前**校验，因此那几类失败仍是 401/403/404/429；
 一旦开始推送，后续错误只能以 `error` 事件表达（HTTP 状态已是 200）。
 
+### MCP 工具
+
+- `POST /mcp/servers/{server_name}/sync`：连接已声明的 MCP 服务器，把其工具同步进
+  注册表。响应 `{ "server", "registered": [Tool...], "skipped": ["<工具名>: <原因>"] }`。
+  `inputSchema` 非法的工具会被跳过而不是写入坏契约。
+- 同步得到的工具 `name` 形如 `echo.echo`，`execution_type=mcp`，
+  `config={"server": "...", "tool": "..."}`。
+- 注册 MCP 工具时，`config.server` 必须已在 `MCP_SERVERS` 中声明，否则 422；
+  执行阶段若服务器已不存在，返回 `failed` + `tool_execution_failed`。
+
 ## 运行记录与限额
 
 - `GET /me`：当前身份（`key_id`、`name`、`role`、`permissions`），供前端决定显示哪些操作。
