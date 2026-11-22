@@ -24,7 +24,8 @@
 ### 限流与配额（已实现）
 - 每密钥每分钟请求数（`RATE_LIMIT_PER_MINUTE`）与每 24 小时运行数（`DAILY_RUN_QUOTA`）。
 - 超限返回 429 并带 `Retry-After`；失败运行同样计数，避免靠制造失败绕过。
-- 当前是**进程内**实现，多副本需换 Redis；阈值设为 0 即关闭。
+- 后端可切换：`memory`（进程内）或 `redis`（ZSET 滑动窗口，多副本共享）。
+- PostgreSQL 与 SQLite 共用同一套 Alembic 迁移；`render_as_batch` 仅对 SQLite 开启。
 
 ## 认证与授权（V0.2）
 

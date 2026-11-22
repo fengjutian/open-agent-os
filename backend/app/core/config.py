@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     bootstrap_admin_api_key: str = ""
     # 每个密钥每分钟允许的请求数；0 表示不限流。
     rate_limit_per_minute: int = 120
+    # 限流后端：memory（进程内）或 redis（多副本共享）
+    rate_limit_backend: str = "memory"
+    redis_url: str = ""
     # 每个密钥 24 小时内允许发起的 Agent 运行数；0 表示不限额。
     daily_run_quota: int = 200
     log_level: str = "INFO"

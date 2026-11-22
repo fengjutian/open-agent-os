@@ -47,7 +47,7 @@ async def get_principal(
         principal = authenticated
 
     # 认证通过后才限流：拿不到身份的请求没必要占用桶。
-    enforce_rate_limit(principal.key_id)
+    await enforce_rate_limit(principal.key_id)
     principal_key_id_var.set(principal.key_id)
     return principal
 

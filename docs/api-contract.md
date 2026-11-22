@@ -238,8 +238,10 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 | 请求频率 | `RATE_LIMIT_PER_MINUTE`（默认 120） | 每个 API Key 每分钟 | 429 `rate_limited` + `Retry-After` |
 | 运行次数 | `DAILY_RUN_QUOTA`（默认 200） | 每个 API Key 每 24 小时 | 429 `quota_exceeded` |
 
-设为 `0` 即关闭对应限制。限流器是**进程内**滑动窗口，多副本部署需换 Redis；
-对外契约不变。失败的运行同样占用配额，避免靠制造失败绕过限额。
+设为 `0` 即关闭对应限制。限流后端由 `RATE_LIMIT_BACKEND` 选择：
+`memory`（进程内，单实例）或 `redis`（多副本共享，需 `REDIS_URL`）；
+对外契约（429 + `Retry-After` + 错误码）与后端无关。
+失败的运行同样占用配额，避免靠制造失败绕过限额。
 
 ## 后续版本
 

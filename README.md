@@ -249,7 +249,7 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 | 运行次数 | `DAILY_RUN_QUOTA` | 200 | 每个 API Key 每 24 小时 |
 
 超限返回 429，错误码分别是 `rate_limited` 与 `quota_exceeded`，并带 `Retry-After`。
-设为 `0` 表示关闭。限流器是进程内实现，多副本部署需换 Redis。
+设为 `0` 表示关闭。限流后端可选 `memory` 或 `redis`，见上文「数据库与限流后端」。
 
 ## 前端界面
 
@@ -261,6 +261,39 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 
 打开 http://localhost:5173 会先要求输入 API Key（存在浏览器本地）。
 
+
+## 数据库与限流后端
+
+### SQLite → PostgreSQL
+
+`DATABASE_URL` 换成 PG 即可，schema 由同一套 Alembic 迁移负责：
+
+```bash
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agent_platform
+alembic upgrade head
+```
+
+驱动的方言差异（`TIMESTAMP WITH TIME ZONE`、索引语法等）由 Alembic 处理；
+`render_as_batch` 只对 SQLite 开启。`tests/test_postgres_dialect.py` 会用离线模式
+（`alembic upgrade head --sql`）校验迁移能为 PG 渲染出合法 SQL——不需要真实 PG 实例。
+
+### 限流后端
+
+| `RATE_LIMIT_BACKEND` | 说明 |
+|---|---|
+| `memory`（默认） | 进程内滑动窗口，零依赖，单实例够用 |
+| `redis` | ZSET 滑动窗口，多副本共享计数；需 `REDIS_URL` |
+
+```bash
+RATE_LIMIT_BACKEND=redis
+REDIS_URL=redis://localhost:6379/0
+```
+
+两种后端语义一致（滑动窗口、429 + `Retry-After`）。Redis 实现用
+`pipeline(transaction=True)` 把「清理过期 + 记账 + 计数 + 续期」做成原子操作，
+不会在窗口边界出现双倍突发。测试用 `fakeredis` 覆盖，无需真实 Redis。
+
+每日运行配额始终基于数据库中的 Run 记录统计，与限流后端无关。
 
 ## 依赖锁定
 
@@ -282,7 +315,8 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 - Agent Loop 工具调用（轮次上限可配）
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
 - Run / RunEvent 持久化与事件流查询
-- 每密钥限流与每日运行配额
+- 每密钥限流与每日运行配额（可切换 Redis 后端）
+- PostgreSQL / SQLite 双支持（同一套迁移）
 - SSE 流式输出（前端增量渲染）
 - 评测与回归（JSON 数据集 + 断言 + CLI）
 - React 界面：对话、工具与策略、运行与审计三个视图
