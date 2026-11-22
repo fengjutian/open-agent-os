@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     context_max_chars: int = 24000
     # 模型调用超时（秒）。
     model_timeout_seconds: float = 90.0
+    # 一次 Agent 运行内允许的最大工具调用轮次，防止无限循环。
+    max_tool_iterations: int = 4
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

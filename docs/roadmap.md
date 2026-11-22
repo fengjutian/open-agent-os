@@ -8,10 +8,10 @@
 - SSE、测试和统一错误后续补齐
 
 ## V0.2 Harness
-- Tool Registry、JSON Schema 校验、Policy Engine
-- Tool Call Loop、MCP
-- Context Compaction、Skill System
-- Run / Event 持久化、Evaluation
+- ✅ Tool Registry、JSON Schema 校验、Policy Engine（deny-by-default）
+- ✅ Tool Call Loop（轮次上限 4）、审计事件与工具调用记录
+- ✅ Context Compaction（按字符预算丢弃最旧历史）
+- 待办：MCP、Skill System、Run / Event 持久化、Evaluation
 
 ## V0.3 Execution
 - Rust Executor、Docker Sandbox

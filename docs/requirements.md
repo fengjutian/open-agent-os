@@ -35,6 +35,8 @@
 ### FR-Tool
 ToolDefinition 包含 name、description、input_schema、permissions、timeout、execution_type。调用必须经过工具存在性校验、Schema 校验、服务端 Policy 校验、审计，再执行。
 
+> V0.2 已实现该链路（含 deny-by-default 策略与审计）；人工审批与调用配额仍待做。
+
 ### FR-Workflow
 支持顺序、并行、条件、循环、人工审批、重试和 Checkpoint。React Flow 负责编辑展示，后端负责执行。
 

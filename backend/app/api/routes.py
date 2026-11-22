@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.helpers import get_or_404
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.request_context import run_id_var
@@ -45,13 +46,6 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
-def _get_or_404(db: Session, model, ident: str, label: str):
-    item = db.get(model, ident)
-    if item is None:
-        raise AppError(ErrorCode.NOT_FOUND, f"{label} not found", status_code=404)
-    return item
-
-
 @router.post("/agents", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
@@ -79,12 +73,12 @@ def list_agents(
 
 @router.get("/agents/{agent_id}", response_model=AgentRead, responses=_NOT_FOUND)
 def get_agent(agent_id: str, db: Session = Depends(get_db)):
-    return _get_or_404(db, Agent, agent_id, "Agent")
+    return get_or_404(db, Agent, agent_id, "Agent")
 
 
 @router.patch("/agents/{agent_id}", response_model=AgentRead, responses=_NOT_FOUND)
 def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_db)):
-    item = _get_or_404(db, Agent, agent_id, "Agent")
+    item = get_or_404(db, Agent, agent_id, "Agent")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
     db.commit()
@@ -98,7 +92,7 @@ def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_
     responses=_NOT_FOUND,
 )
 def delete_agent(agent_id: str, db: Session = Depends(get_db)):
-    item = _get_or_404(db, Agent, agent_id, "Agent")
+    item = get_or_404(db, Agent, agent_id, "Agent")
     db.delete(item)
     db.commit()
 
@@ -109,7 +103,7 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
 )
 def create_conversation(agent_id: str, payload: ConversationCreate, db: Session = Depends(get_db)):
-    _get_or_404(db, Agent, agent_id, "Agent")
+    get_or_404(db, Agent, agent_id, "Agent")
     item = Conversation(agent_id=agent_id, title=payload.title)
     db.add(item)
     db.commit()
@@ -128,7 +122,7 @@ def list_conversations(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    _get_or_404(db, Agent, agent_id, "Agent")
+    get_or_404(db, Agent, agent_id, "Agent")
     total = (
         db.scalar(
             select(func.count()).select_from(Conversation).where(Conversation.agent_id == agent_id)
@@ -156,7 +150,7 @@ def list_messages(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    _get_or_404(db, Conversation, conversation_id, "Conversation")
+    get_or_404(db, Conversation, conversation_id, "Conversation")
     total = (
         db.scalar(
             select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
@@ -183,7 +177,7 @@ async def send_message(
     payload: MessageCreate,
     db: Session = Depends(get_db),
 ):
-    conversation = _get_or_404(db, Conversation, conversation_id, "Conversation")
+    conversation = get_or_404(db, Conversation, conversation_id, "Conversation")
 
     run_id = f"run_{uuid4().hex}"
     token = run_id_var.set(run_id)

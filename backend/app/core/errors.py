@@ -14,9 +14,19 @@ class ErrorCode:
 
     NOT_FOUND = "not_found"
     VALIDATION_ERROR = "validation_error"
+    CONFLICT = "conflict"
     MODEL_NOT_CONFIGURED = "model_not_configured"
     MODEL_PROVIDER_ERROR = "model_provider_error"
     INTERNAL_ERROR = "internal_error"
+
+    # ---- V0.2 工具层 ----
+    TOOL_NOT_FOUND = "tool_not_found"
+    TOOL_DISABLED = "tool_disabled"
+    TOOL_ARGUMENTS_INVALID = "tool_arguments_invalid"
+    POLICY_DENIED = "policy_denied"
+    TOOL_EXECUTION_FAILED = "tool_execution_failed"
+    TOOL_TIMEOUT = "tool_timeout"
+    EXECUTOR_NOT_AVAILABLE = "executor_not_available"
 
 
 class AppError(Exception):

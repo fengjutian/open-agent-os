@@ -1,5 +1,8 @@
+import json
 import logging
 from datetime import timedelta
+from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,15 +10,26 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import log_event
+from app.core.request_context import run_id_var
 from app.models.entities import Agent, Conversation, Message, now_utc
 from app.services.context import ChatMessage, build_messages
-from app.services.model_gateway import ModelProvider, get_model_provider
+from app.services.model_gateway import ModelProvider, ModelReply, ToolCall, get_model_provider
+from app.services.policy import PolicyEngine
+from app.services.tool_gateway import ToolCallOutcome, ToolGateway
+from app.services.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
 
+def max_iterations_message(limit: int) -> str:
+    return (
+        "（已达到单次运行的工具调用轮次上限，未能给出最终回答。"
+        f"上限为 {limit} 轮，请缩小任务范围后重试。）"
+    )
+
+
 class AgentRuntime:
-    """Agent Loop 的唯一编排点：拼上下文 → 调模型 → 落库。
+    """Agent Loop 的唯一编排点：拼上下文 → 调模型 → 治理工具 → 落库。
 
     provider 可注入，便于测试替换；默认按配置读取。
     """
@@ -66,6 +80,13 @@ class AgentRuntime:
                 max_chars=settings.context_max_chars,
             )
 
+        provider = self._provider or get_model_provider()
+        # 只把「策略已放行」的工具暴露给模型：模型连看不到的工具都不会去请求。
+        tool_specs = self._available_tool_specs(db, agent_id=agent.id)
+        messages: list[dict[str, Any]] = [
+            {"role": m.role, "content": m.content} for m in context.messages
+        ]
+
         log_event(
             logger,
             "agent run started",
@@ -73,13 +94,42 @@ class AgentRuntime:
             conversation_id=conversation.id,
             model=agent.model,
             context_messages=len(context.messages),
+            available_tools=[spec["function"]["name"] for spec in tool_specs],
         )
 
-        provider = self._provider or get_model_provider()
-        answer = await provider.generate(
-            model=agent.model,
-            messages=[{"role": m.role, "content": m.content} for m in context.messages],
-        )
+        answer = ""
+        max_iterations = max(1, settings.max_tool_iterations)
+        for iteration in range(1, max_iterations + 1):
+            reply = await provider.generate(
+                model=agent.model,
+                messages=messages,
+                tools=tool_specs or None,
+            )
+
+            if not reply.tool_calls:
+                answer = reply.text
+                break
+
+            messages.append(self._assistant_tool_call_message(reply))
+            for call in reply.tool_calls:
+                outcome = await self._run_tool(db, agent, conversation, call)
+                messages.append(self._tool_result_message(call, outcome))
+
+            log_event(
+                logger,
+                "tool loop iteration",
+                iteration=iteration,
+                tool_calls=[call.name for call in reply.tool_calls],
+            )
+        else:
+            # 达到轮次上限仍未收敛：明确告知，而不是无限循环或假装成功。
+            log_event(
+                logger,
+                "tool loop hit max iterations",
+                level=logging.WARNING,
+                max_iterations=max_iterations,
+            )
+            answer = max_iterations_message(max_iterations)
 
         # 消息顺序依赖 created_at：Mock provider 几乎无耗时，两条消息可能落在同一微秒，
         # 导致用户消息与回复的顺序不稳定。这里强制让回复的时间戳严格晚于用户消息。
@@ -110,3 +160,76 @@ class AgentRuntime:
             answer_chars=len(answer),
         )
         return user_message, assistant_message
+
+    # ------------------------------------------------------------------
+    # 内部工具
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _available_tool_specs(db: Session, *, agent_id: str) -> list[dict[str, Any]]:
+        engine = PolicyEngine(db)
+        specs: list[dict[str, Any]] = []
+        for tool in ToolRegistry(db).list_enabled():
+            if not engine.evaluate(agent_id=agent_id, tool_name=tool.name).allowed:
+                continue
+            specs.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description or tool.name,
+                        "parameters": tool.input_schema
+                        or {"type": "object", "additionalProperties": False},
+                    },
+                }
+            )
+        return specs
+
+    async def _run_tool(
+        self,
+        db: Session,
+        agent: Agent,
+        conversation: Conversation,
+        call: ToolCall,
+    ) -> ToolCallOutcome:
+        run_id = run_id_var.get() or f"run_{uuid4().hex}"
+        return await ToolGateway(db).invoke(
+            run_id=run_id,
+            tool_name=call.name,
+            arguments=call.arguments,
+            agent_id=agent.id,
+            conversation_id=conversation.id,
+        )
+
+    @staticmethod
+    def _assistant_tool_call_message(reply: ModelReply) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": reply.text or None,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                    },
+                }
+                for call in reply.tool_calls
+            ],
+        }
+
+    @staticmethod
+    def _tool_result_message(call: ToolCall, outcome: ToolCallOutcome) -> dict[str, Any]:
+        # 把治理结论原样回灌给模型：被拒绝时它能看到原因并调整，而不是凭空成功。
+        payload: dict[str, Any] = {"status": outcome.status}
+        if outcome.result is not None:
+            payload["result"] = outcome.result
+        if outcome.error_code is not None:
+            payload["error"] = {"code": outcome.error_code, "message": outcome.error_message}
+        return {
+            "role": "tool",
+            "tool_call_id": call.id,
+            "name": call.name,
+            "content": json.dumps(payload, ensure_ascii=False),
+        }

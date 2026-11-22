@@ -94,6 +94,48 @@ CI（`.github/workflows/ci.yml`）会跑：Ruff、pytest、前端构建、Rust �
 `CONTEXT_MAX_CHARS`（默认 24000）限制单次请求的上下文预算。超出时从最旧的历史消息开始丢弃，
 最新的用户输入始终保留（过长则截断尾部），并在日志中记录 `context trimmed to budget` 事件。
 
+## 工具治理（V0.2）
+
+工具调用固定走五步，任一步不通过都不会进入下一步：
+
+```text
+Tool Registry → JSON Schema → Policy Engine → Audit → Execution
+```
+
+**默认拒绝。** 注册一个工具不会让它可用，必须显式添加 allow 规则：
+
+```bash
+# 1. 注册工具（内建实现只有 echo / current_time）
+curl -X POST localhost:8000/api/v1/tools -H 'Content-Type: application/json' -d '{
+  "name": "echo",
+  "description": "回显文本",
+  "input_schema": {"type":"object","properties":{"text":{"type":"string"}},
+                   "required":["text"],"additionalProperties":false},
+  "permissions": ["read:text"]
+}'
+
+# 2. 此时调用会被拒绝（deny-by-default）
+curl -X POST localhost:8000/api/v1/agents/<AGENT_ID>/tools/echo/invoke \
+  -H 'Content-Type: application/json' -d '{"arguments":{"text":"hi"}}'
+# => {"status":"denied","error_code":"policy_denied", ...}
+
+# 3. 显式放行后再调用
+curl -X POST localhost:8000/api/v1/policy-rules -H 'Content-Type: application/json' \
+  -d '{"agent_id":"<AGENT_ID>","tool_name":"echo","effect":"allow"}'
+# => {"status":"succeeded","result":{"text":"hi"}, ...}
+```
+
+要点：
+
+- 策略裁决：priority 大者优先 → agent 专属优先于全局 → 同层 deny 优先于 allow。
+- **注册 ≠ 有执行能力**：只有内建白名单（`echo`、`current_time`）能真正执行；
+  `execution_type=executor` 一律返回 `executor_not_available`，等 V0.3 隔离执行器。
+- 每次调用都落 `ToolInvocation` 与 `AuditLog`（审计只记参数键名，不记参数值）。
+- 模型只能提出调用请求：Agent Loop 里只会把**已放行**的工具告诉模型，
+  被拒绝的结果会连同原因回灌给模型，最多 `MAX_TOOL_ITERATIONS`（默认 4）轮。
+
+接口与状态码见 [docs/api-contract.md](docs/api-contract.md)。
+
 ## 依赖锁定
 
 - 前端：`package.json` 使用精确版本，`package-lock.json` 已提交，CI/镜像用 `npm ci`。
@@ -110,6 +152,8 @@ CI（`.github/workflows/ci.yml`）会跑：Ruff、pytest、前端构建、Rust �
 - SQLite 持久化 + Alembic 迁移
 - Mock / OpenAI-compatible 模型适配器
 - 统一错误信封、分页、结构化日志与 request_id/run_id
+- 工具注册表 + JSON Schema 校验 + 服务端策略（deny-by-default）+ 审计
+- Agent Loop 工具调用（轮次上限可配）
 - React Agent 管理和聊天界面
 
 ## 重要边界

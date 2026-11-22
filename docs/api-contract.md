@@ -42,9 +42,22 @@ Base URL：`/api/v1`
 |---|---|---|
 | `not_found` | 404 | 资源不存在 |
 | `validation_error` | 422 | 请求体或查询参数校验失败（`details` 为字段级错误） |
+| `conflict` | 409 | 资源冲突（如工具名重复） |
 | `model_not_configured` | 424 | 缺少模型密钥等配置 |
 | `model_provider_error` | 502 / 504 | 模型服务错误或超时 |
 | `internal_error` | 500 | 未预期异常 |
+
+工具治理相关（出现在调用响应的 `error_code` 字段，见下）：
+
+| code | 含义 |
+|---|---|
+| `tool_not_found` | 工具未注册 |
+| `tool_disabled` | 工具已停用 |
+| `tool_arguments_invalid` | 参数不符合工具的 input_schema |
+| `policy_denied` | 服务端策略拒绝 |
+| `tool_timeout` | 工具执行超时 |
+| `tool_execution_failed` | 工具执行失败（含内建实现缺失） |
+| `executor_not_available` | 需要 V0.3 隔离执行器，当前不可用 |
 
 ## 接口
 
@@ -78,6 +91,85 @@ Base URL：`/api/v1`
 
 所有时间均为 UTC，序列化为带 `Z` 后缀的 ISO 8601，例如 `2026-11-22T12:37:54.123456Z`。
 （SQLite 不保存时区，服务端会在输出时补上 UTC 标记。）
+
+## V0.2 工具治理
+
+### 工具注册表
+
+- `POST /tools`：注册工具。body：`name`（`^[a-z][a-z0-9_.-]{1,63}$`）、`description`、
+  `input_schema`（JSON Schema）、`permissions`、`timeout_seconds`（0–60）、
+  `execution_type`（`builtin` | `executor`）、`enabled`。重名返回 409，
+  `input_schema` 非法返回 422。
+- `GET /tools`：列表（分页）。
+- `GET /tools/{tool_id}`：详情。
+- `PATCH /tools/{tool_id}`：更新（`description`/`permissions`/`timeout_seconds`/`enabled`）。
+
+**注册工具不会产生执行能力。** 只有平台内建白名单里存在实现的工具才能执行；
+`execution_type=executor` 目前一律拒绝（等 V0.3 隔离执行器）。
+
+### 策略规则
+
+- `POST /policy-rules`：`agent_id`（为空表示全局）、`tool_name`（或 `*`）、
+  `effect`（`allow` | `deny`）、`priority`（默认 100）、`note`。
+- `GET /policy-rules`：列表，可按 `agent_id` 过滤。
+
+裁决顺序：**priority 大者优先 → agent 专属优先于全局 → 同层 deny 优先于 allow**；
+没有任何 allow 命中即拒绝（deny-by-default）。
+
+### 受控调用
+
+`POST /agents/{agent_id}/tools/{tool_name}/invoke`
+
+```json
+{ "arguments": { "text": "hello" }, "conversation_id": null }
+```
+
+响应（注意：被拒绝也是 200，治理结论在响应体里）：
+
+```json
+{
+  "run_id": "run_830791cf9d004836abf3aef2a2e43af0",
+  "invocation_id": "...",
+  "tool_name": "echo",
+  "status": "succeeded",
+  "allowed": true,
+  "reason": "命中策略规则 ...（allow，priority=100）",
+  "result": { "text": "hello" },
+  "error_code": null,
+  "error_message": null
+}
+```
+
+`status` 取值：
+
+| status | 含义 |
+|---|---|
+| `succeeded` | 通过治理并执行成功 |
+| `denied` | 在治理阶段被拦下（未注册 / 停用 / 参数不合契约 / 策略拒绝），**没有执行** |
+| `failed` | 通过治理但执行失败（超时、实现缺失等） |
+
+调用顺序固定为：**注册表 → JSON Schema → 策略 → 审计 → 执行**，任一步不过都不会进入下一步。
+HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错误，因此返回 200 并在响应体中表达。
+
+注意：工具执行成功会**立即提交**其调用记录，之后即便模型调用失败也不会回滚——
+真实副作用不应被假装撤销。
+
+> ⚠️ `/tools` 与 `/policy-rules` 目前无认证（V0.2 尚未接入鉴权），等同于匿名可写，
+> 不可暴露在可信网络之外。详见 [security.md](security.md)。
+
+### 观测
+
+- `GET /agents/{agent_id}/tools`：该 Agent 视角下每个工具的可用性（`allowed` + `reason`）。
+- `GET /tool-invocations`：调用记录，可按 `run_id`、`tool_name` 过滤。
+- `GET /audit-logs`：审计事件，可按 `run_id`、`action` 过滤。
+  包含 `tool.register` / `tool.update` / `policy.create` / `tool.invoke` / `tool.execute.failed`。
+  审计只记录参数**键名**，不记录参数值。
+
+### Agent Loop 中的工具调用
+
+模型可以在一轮回复中提出工具调用，平台会逐个走上述治理流程，并把结果（含拒绝原因）
+回灌给模型继续推理，最多 `MAX_TOOL_ITERATIONS`（默认 4）轮。
+只有**策略已放行**的工具才会出现在模型可用的 tools 列表里。
 
 ## 后续版本
 

@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
@@ -109,3 +109,126 @@ class SendMessageResponse(BaseModel):
     run_id: str
     user_message: MessageRead
     assistant_message: MessageRead
+
+
+# ---------------------------------------------------------------------------
+# V0.2 工具层
+# ---------------------------------------------------------------------------
+
+TOOL_NAME_PATTERN = r"^[a-z][a-z0-9_.-]{1,63}$"
+
+
+def _empty_object_schema() -> dict[str, Any]:
+    # 没声明参数的工具，默认不接受任何参数（安全默认）。
+    return {"type": "object", "additionalProperties": False}
+
+
+class ToolCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=64, pattern=TOOL_NAME_PATTERN)
+    description: str = Field(default="", max_length=2000)
+    input_schema: dict[str, Any] = Field(default_factory=_empty_object_schema)
+    permissions: list[str] = Field(default_factory=list, max_length=20)
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    execution_type: Literal["builtin", "executor"] = "builtin"
+    enabled: bool = True
+
+
+class ToolUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=2000)
+    permissions: list[str] | None = Field(default=None, max_length=20)
+    timeout_seconds: float | None = Field(default=None, gt=0, le=60)
+    enabled: bool | None = None
+
+
+class ToolRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    permissions: list[str]
+    timeout_seconds: float
+    execution_type: str
+    enabled: bool
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
+class PolicyRuleCreate(BaseModel):
+    # 为空表示全局规则
+    agent_id: str | None = None
+    # 具体工具名，或 "*" 表示任意工具
+    tool_name: str = Field(min_length=1, max_length=120)
+    effect: Literal["allow", "deny"]
+    priority: int = Field(default=100, ge=0, le=10000)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class PolicyRuleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str | None
+    tool_name: str
+    effect: str
+    priority: int
+    enabled: bool
+    note: str | None
+    created_at: UtcDatetime
+
+
+class ToolInvokeRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    conversation_id: str | None = None
+
+
+class ToolInvokeResponse(BaseModel):
+    run_id: str
+    invocation_id: str
+    tool_name: str
+    status: str  # succeeded | denied | failed
+    allowed: bool
+    reason: str
+    result: dict[str, Any] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class ToolInvocationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    run_id: str
+    agent_id: str | None
+    conversation_id: str | None
+    tool_name: str
+    arguments: dict[str, Any]
+    result: dict[str, Any] | None
+    status: str
+    error_code: str | None
+    error_message: str | None
+    started_at: UtcDatetime
+    finished_at: UtcDatetime | None
+
+
+class AuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    run_id: str | None
+    request_id: str | None
+    actor: str
+    action: str
+    resource: str
+    decision: str | None
+    reason: str | None
+    detail: dict[str, Any] | None
+    created_at: UtcDatetime
+
+
+class AgentToolRead(BaseModel):
+    """某个 Agent 视角下的工具可用性（注册状态 + 策略裁决）。"""
+
+    name: str
+    description: str
+    execution_type: str
+    enabled: bool
+    allowed: bool
+    reason: str
