@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # 从哪个 claim 取角色；取不到或非法时回落到 oidc_default_role
     oidc_role_claim: str = "role"
     oidc_default_role: str = "viewer"
+    # 从哪个 claim 取租户；取不到时落到默认租户
+    oidc_tenant_claim: str = "tenant"
     oidc_algorithms: str = "RS256"
     oidc_jwks_cache_seconds: int = 300
     # 每个密钥每分钟允许的请求数；0 表示不限流。

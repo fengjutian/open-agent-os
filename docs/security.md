@@ -54,9 +54,17 @@
 - 审计记录操作主体（`key:<id>`），可追溯到具体密钥。
 - `AUTH_ENABLED=false` 是本地开发的逃生口，等价于匿名管理员，生产必须保持默认值。
 
+### 多租户隔离（V0.2 已实现）
+- 所有业务表带 `tenant_id`；租户来自 API Key 的归属或 OIDC 的 tenant claim。
+- 隔离在数据访问层统一施加（SQLAlchemy `with_loader_criteria`），覆盖 `select`、
+  `Session.get`、`count` 与显式 where，因此不会因为「某个查询忘了加条件」而泄露。
+- 跨租户访问统一返回 404，不泄露资源是否存在。
+- 唯一需要跨租户读的地方（按密钥哈希认证）必须显式
+  `execution_options(include_all_tenants=True)`，绕过行为在代码中可见。
+- 测试同时覆盖 ORM 层与 API 层，并有一条结构性测试要求所有模型都有 `tenant_id`。
+
 ### 仍未实现
-组织与多租户、细粒度资源级授权（当前是全局角色）、密钥轮换与过期策略、
-登录审计与异常检测。
+组织/成员/计费模型、跨租户管理员视图、审计防篡改、人工审批。
 
 ### OIDC / JWT（V0.2 已实现）
 - 与 API Key 并存；凭据含两个点按 JWT 校验，否则按 API Key 查库。

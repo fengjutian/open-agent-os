@@ -258,6 +258,8 @@ class AgentToolRead(BaseModel):
 class ApiKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     role: Literal["admin", "developer", "viewer"] = "viewer"
+    # 仅在为**其他租户**发密钥时需要显式指定；默认落在调用者所在租户
+    tenant_id: str | None = Field(default=None, max_length=36)
 
 
 class ApiKeyUpdate(BaseModel):

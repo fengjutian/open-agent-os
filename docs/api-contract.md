@@ -26,6 +26,15 @@ Authorization: Bearer oak_xxxxxxxx
 | `developer` | `read`、`write:agents`、`invoke:tools` |
 | `admin` | 全部，含 `write:tools`、`write:policy`、`write:keys` |
 
+### 租户
+
+所有资源都属于某个租户。租户由凭据决定（API Key 的归属 / OIDC 的 `tenant` claim），
+**不是**请求参数——客户端无法通过改参数切换租户。
+
+- 跨租户访问一律返回 **404**（不区分「不存在」与「不属于你」）。
+- 列表、审计、运行记录都只返回本租户数据。
+- `POST /api-keys` 可带 `tenant_id`，用于为该租户签发密钥（仅 admin）。
+
 ### 分页
 
 所有列表接口统一返回分页信封：

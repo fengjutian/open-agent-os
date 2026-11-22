@@ -76,3 +76,42 @@ def test_upgrade_with_existing_rows_adds_skill_names(tmp_path):
 
     assert row is not None
     assert row[0] == "[]"
+
+
+def test_tenant_migration_backfills_existing_rows(tmp_path):
+    """回归：加 tenant_id 时已有数据必须被回填成默认租户，而不是升级失败或变 NULL。"""
+    db_path = tmp_path / "pre_tenant.db"
+
+    # 先升到引入租户隔离之前的那一版
+    result = _alembic(db_path, "upgrade", "92fff69ba6f8")
+    assert result.returncode == 0, result.stderr[-2000:]
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agents "
+            "(id, name, description, system_prompt, model, skill_names, created_at, updated_at) "
+            "VALUES ('a1', 'legacy', NULL, 'p', 'm', '[]', "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        )
+        connection.execute(
+            "INSERT INTO tool_definitions "
+            "(id, name, description, input_schema, permissions, timeout_seconds, "
+            " execution_type, config, enabled, created_at, updated_at) "
+            "VALUES ('t1', 'legacy_tool', '', '{}', '[]', 10, 'builtin', NULL, 1, "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        )
+        connection.commit()
+
+    result = _alembic(db_path, "upgrade", "head")
+    assert result.returncode == 0, result.stderr[-2000:]
+
+    with sqlite3.connect(db_path) as connection:
+        agent_tenant = connection.execute(
+            "SELECT tenant_id FROM agents WHERE id = 'a1'"
+        ).fetchone()
+        tool_tenant = connection.execute(
+            "SELECT tenant_id FROM tool_definitions WHERE id = 't1'"
+        ).fetchone()
+
+    assert agent_tenant == ("default",)
+    assert tool_tenant == ("default",)

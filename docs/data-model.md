@@ -45,6 +45,17 @@
 刻意用**名称**而不是外键：运行时按名称解析，缺失/停用就跳过，
 避免改了技能就把历史 Agent 卡住；代价是重命名会断引用，因此写入时校验存在性。
 
+## 多租户
+所有业务表（agents、conversations、messages、tool_definitions、policy_rules、
+tool_invocations、audit_logs、api_keys、runs、run_events、skills）都有
+`tenant_id`（默认 `default`，带索引）。
+
+唯一约束从「全局唯一」改为「租户内唯一」：`tool_definitions` 与 `skills` 使用
+`(tenant_id, name)`。`api_keys.name` 保持全局唯一，`api_keys.key_hash` 全局唯一
+（一把密钥只属于一个租户）。
+
+过滤由 `app/db/tenancy.py` 的 ORM 事件统一施加，不依赖每条查询自觉过滤。
+
 ## 企业化扩展
 Organization、User、Membership、Role、Permission、ApiKey、AgentVersion、Run、RunEvent、
 Checkpoint、ExecutionArtifact、Secret。（ToolDefinition / PolicyRule / ToolInvocation /

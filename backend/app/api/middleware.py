@@ -17,6 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.api.error_handlers import error_response
 from app.core.errors import ErrorCode
 from app.core.request_context import principal_key_id_var, request_id_var, run_id_var
+from app.core.tenancy import reset_tenant, set_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ class RequestContextMiddleware:
         request_token = request_id_var.set(request_id)
         run_token = run_id_var.set(None)
         principal_token = principal_key_id_var.set(None)
+        # 每个请求从默认租户开始：即使上一次请求残留了上下文，也不会串租户。
+        tenant_token = set_tenant(None)
 
         started = time.perf_counter()
         state: dict[str, object] = {"status": 500, "started": False}
@@ -81,6 +84,7 @@ class RequestContextMiddleware:
         finally:
             principal_key_id_var.reset(principal_token)
             run_id_var.reset(run_token)
+            reset_tenant(tenant_token)
             request_id_var.reset(request_token)
 
     @staticmethod

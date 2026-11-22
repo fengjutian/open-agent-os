@@ -16,3 +16,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# 注册租户过滤（必须在 Base 定义之后导入，否则无法引用）
+import app.db.tenancy  # noqa: E402, F401
+

@@ -44,7 +44,9 @@ def create_api_key(
     principal: Principal = Depends(require_permission(WRITE_KEYS)),
     db: Session = Depends(get_db),
 ):
-    record, raw = ApiKeyService(db).create(name=payload.name, role=payload.role)
+    record, raw = ApiKeyService(db).create(
+        name=payload.name, role=payload.role, tenant_id=payload.tenant_id
+    )
     AuditService(db).record(
         action="apikey.create",
         actor=principal_actor(principal),

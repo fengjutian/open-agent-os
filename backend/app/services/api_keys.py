@@ -16,6 +16,8 @@ from app.core.security import (
     key_prefix,
     principal_for,
 )
+from app.core.tenancy import current_tenant
+from app.db.tenancy import INCLUDE_ALL_TENANTS
 from app.models.entities import ApiKey, now_utc
 
 logger = logging.getLogger(__name__)
@@ -29,11 +31,19 @@ class ApiKeyService:
     # 创建与校验
     # ------------------------------------------------------------------
 
-    def create(self, *, name: str, role: str) -> tuple[ApiKey, str]:
+    def create(self, *, name: str, role: str, tenant_id: str | None = None) -> tuple[ApiKey, str]:
         """创建密钥并返回 (记录, 明文)。明文只在此刻可见。"""
         if role not in ROLES:
             raise AppError(ErrorCode.VALIDATION_ERROR, f"未知角色 {role}", status_code=422)
-        if self._db.scalar(select(ApiKey).where(ApiKey.name == name)) is not None:
+        # name 是全局唯一约束，因此查重也必须跨租户，否则会漏判并撞库变成 500
+        if (
+            self._db.scalar(
+                select(ApiKey)
+                .where(ApiKey.name == name)
+                .execution_options(**{INCLUDE_ALL_TENANTS: True})
+            )
+            is not None
+        ):
             raise AppError(ErrorCode.CONFLICT, f"API Key 名称 {name} 已存在", status_code=409)
 
         raw = generate_api_key()
@@ -43,6 +53,7 @@ class ApiKeyService:
             key_hash=hash_api_key(raw),
             role=role,
             enabled=True,
+            tenant_id=tenant_id or current_tenant(),
         )
         self._db.add(record)
         self._db.commit()
@@ -50,13 +61,24 @@ class ApiKeyService:
         return record, raw
 
     def authenticate(self, raw: str) -> Principal | None:
-        record = self._db.scalar(select(ApiKey).where(ApiKey.key_hash == hash_api_key(raw)))
+        # 认证发生在知道租户之前，必须跨租户按哈希查找——
+        # 这是唯一需要绕过租户过滤的读，因此显式标注 execution option。
+        record = self._db.scalar(
+            select(ApiKey)
+            .where(ApiKey.key_hash == hash_api_key(raw))
+            .execution_options(**{INCLUDE_ALL_TENANTS: True})
+        )
         if record is None or not record.enabled:
             return None
 
         record.last_used_at = now_utc()
         self._db.commit()
-        return principal_for(key_id=record.id, name=record.name, role=record.role)
+        return principal_for(
+            key_id=record.id,
+            name=record.name,
+            role=record.role,
+            tenant_id=record.tenant_id,
+        )
 
     # ------------------------------------------------------------------
     # 管理

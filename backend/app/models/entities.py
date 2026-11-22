@@ -1,16 +1,29 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.tenancy import current_tenant
 from app.db.session import Base
 
 
 def now_utc():
     return datetime.now(UTC)
 
-class Agent(Base):
+
+class TenantMixin:
+    """所有业务表都带 tenant_id。
+
+    过滤不靠每条查询自己加 where，而是由 app/db/tenancy.py 的 ORM 事件统一施加。
+    写入时默认取当前请求的租户。
+    """
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), default=current_tenant, nullable=False, index=True
+    )
+
+class Agent(TenantMixin, Base):
     __tablename__ = "agents"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -27,7 +40,7 @@ class Agent(Base):
         back_populates="agent", cascade="all, delete-orphan"
     )
 
-class Conversation(Base):
+class Conversation(TenantMixin, Base):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
@@ -39,7 +52,7 @@ class Conversation(Base):
         back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
-class Message(Base):
+class Message(TenantMixin, Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
@@ -49,7 +62,7 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
-class Run(Base):
+class Run(TenantMixin, Base):
     """一次 Agent 运行的主体记录。
 
     run_id 就是这张表的主键；此前它只存在于日志里，现在可以按 id 回溯整条链路。
@@ -74,7 +87,7 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class RunEvent(Base):
+class RunEvent(TenantMixin, Base):
     """运行过程中的事件流（追加写，不修改）。
 
     不建到 runs 的外键：与审计同一思路，事件记录的寿命不依赖业务数据的生命周期。
@@ -90,7 +103,7 @@ class RunEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class Skill(Base):
+class Skill(TenantMixin, Base):
     """可复用的指令包。
 
     一个 Skill 就是一段被命名的「行为约定」，可以被多个 Agent 引用。
@@ -98,9 +111,11 @@ class Skill(Base):
     """
 
     __tablename__ = "skills"
+    # 名称在租户内唯一：不同租户可以各自拥有同名技能
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_skills_tenant_name"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -108,7 +123,7 @@ class Skill(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class ApiKey(Base):
+class ApiKey(TenantMixin, Base):
     """API 密钥。
 
     只保存 SHA-256 摘要，明文仅在创建/引导时返回或打印一次。
@@ -118,8 +133,10 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    # 密钥名保持全局唯一（人类标签，管理面小）；真正区分租户的是 tenant_id
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 哈希全局唯一：一把密钥只属于一个租户
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -127,16 +144,20 @@ class ApiKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class ToolDefinition(Base):
+class ToolDefinition(TenantMixin, Base):
     """工具注册表条目。
 
     模型只能「看到」注册在这里的工具；未注册的工具名一律不存在。
     """
 
     __tablename__ = "tool_definitions"
+    # 名称在租户内唯一
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_tool_definitions_tenant_name"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     # 入参的 JSON Schema；调用前必须通过它的校验。
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -154,7 +175,7 @@ class ToolDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class PolicyRule(Base):
+class PolicyRule(TenantMixin, Base):
     """服务端策略规则。
 
     agent_id 为空表示全局规则；priority 越大越优先；同优先级下 deny 胜过 allow。
@@ -176,7 +197,7 @@ class PolicyRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class ToolInvocation(Base):
+class ToolInvocation(TenantMixin, Base):
     """一次工具调用的持久记录（无论成功、被拒还是失败）。
 
     故意不建到 agents 的外键：审计记录不应随 Agent 删除而消失。
@@ -198,7 +219,7 @@ class ToolInvocation(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class AuditLog(Base):
+class AuditLog(TenantMixin, Base):
     """审计事件。同样不挂外键，保证记录不可被级联删除。"""
 
     __tablename__ = "audit_logs"

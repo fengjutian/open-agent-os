@@ -12,6 +12,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.oidc import looks_like_jwt, principal_from_token
 from app.core.request_context import principal_key_id_var
 from app.core.security import ANONYMOUS_ADMIN, Principal
+from app.core.tenancy import set_tenant
 from app.db.session import get_db
 from app.services.api_keys import ApiKeyService
 from app.services.rate_limit import enforce_rate_limit
@@ -56,6 +57,8 @@ async def get_principal(
     # 认证通过后才限流：拿不到身份的请求没必要占用桶。
     await enforce_rate_limit(principal.key_id)
     principal_key_id_var.set(principal.key_id)
+    # 认证完成后才知道租户；之后所有查询都会被限制在该租户内。
+    set_tenant(principal.tenant_id)
     return principal
 
 

@@ -365,6 +365,53 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" localhost:8000/api/v1/agents
 > 目前只做了**认证**：`sub` 只用于审计和 Run 归属，还没有组织/租户隔离。
 > 也就是说所有通过认证的身份看到的是同一份数据。
 
+## 多租户隔离
+
+所有业务表都带 `tenant_id`，请求的租户由凭据决定：
+
+| 凭据 | 租户来源 |
+|---|---|
+| API Key | 密钥自身的 `tenant_id` |
+| OIDC / JWT | `OIDC_TENANT_CLAIM`（默认 `tenant`）claim，取不到则 `default` |
+| 认证关闭（本地） | `default` |
+
+**隔离不是靠每条查询自觉加 `where`**，而是在数据访问层统一施加：
+
+```python
+# app/db/tenancy.py
+with_loader_criteria(Base, _criteria, include_aliases=True)
+```
+
+这个 ORM 事件会被注入到所有 SELECT，实测覆盖 `select()`、`Session.get()`、
+`count()` 以及带显式 where 的查询。因此跨租户访问**统一表现为 404**，
+不会泄露「这个 id 是否存在」。
+
+确实需要跨租户读的地方必须显式声明，让绕过在代码里可见：
+
+```python
+select(ApiKey).execution_options(include_all_tenants=True)  # 仅认证时按哈希查密钥
+```
+
+### 开一个新租户
+
+admin 可以为指定租户签发密钥：
+
+```bash
+curl -X POST localhost:8000/api/v1/api-keys -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"acme-admin","role":"admin","tenant_id":"acme"}'
+```
+
+之后用这把密钥创建的资源都落在 `acme` 租户下，对其他租户不可见。
+
+### 已知取舍
+
+- 工具与技能的名称是**租户内唯一**（`(tenant_id, name)`），因此不同租户可以各自
+  拥有 `echo`。
+- API Key 的名称仍是**全局唯一**（它是人类标签，改动涉及不可回滚的约束重建），
+  跨租户重名会返回 409。
+- 没有组织/成员/计费概念，也没有跨租户的管理员视图。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL
@@ -418,6 +465,7 @@ REDIS_URL=redis://localhost:6379/0
 - Agent Loop 工具调用（轮次上限可配）
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
 - OIDC / JWT 认证（与 API Key 并存，JWKS 验签）
+- 多租户隔离（数据层强制过滤，跨租户 404）
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额（可切换 Redis 后端）
 - PostgreSQL / SQLite 双支持（同一套迁移）

@@ -22,6 +22,7 @@ import jwt
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.security import ROLES, Principal, principal_for
+from app.core.tenancy import DEFAULT_TENANT
 
 logger = logging.getLogger(__name__)
 
@@ -153,4 +154,11 @@ def _principal_from_claims(claims: dict[str, Any]) -> Principal:
     name = str(
         claims.get("preferred_username") or claims.get("email") or claims.get("name") or subject
     )
-    return principal_for(key_id=f"oidc:{subject}", name=name, role=role, auth_method="oidc")
+    tenant = str(claims.get(settings.oidc_tenant_claim) or DEFAULT_TENANT)
+    return principal_for(
+        key_id=f"oidc:{subject}",
+        name=name,
+        role=role,
+        auth_method="oidc",
+        tenant_id=tenant,
+    )

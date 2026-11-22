@@ -25,8 +25,8 @@
 
 ## V0.4 Enterprise
 - ⏳ OIDC、组织与多租户、RBAC/ABAC
-  （已落地：API Key + OIDC/JWT 认证、admin/developer/viewer 三角色 RBAC；
-  组织与多租户仍未实现）
+  （已落地：API Key + OIDC/JWT 认证、三角色 RBAC、数据层多租户隔离；
+  组织/成员管理与跨租户管理视图仍未实现）
 - ⏳ PostgreSQL、Redis（已支持：PG 语法与迁移、Redis 限流后端）
 - Temporal
 - 审计、限流、配额、成本管理（限流与配额已落地）

@@ -52,6 +52,8 @@ class Principal:
     permissions: frozenset[str] = field(default_factory=frozenset)
     # 凭据来源：api_key / oidc / none（认证关闭时的匿名）
     auth_method: str = "api_key"
+    # 所属租户；所有数据访问都会被限制在这个租户内
+    tenant_id: str = "default"
 
     def can(self, permission: str) -> bool:
         return permission in self.permissions
@@ -68,16 +70,25 @@ ANONYMOUS_ADMIN = Principal(
     role="admin",
     permissions=ALL_PERMISSIONS,
     auth_method="none",
+    tenant_id="default",
 )
 
 
-def principal_for(*, key_id: str, name: str, role: str, auth_method: str = "api_key") -> Principal:
+def principal_for(
+    *,
+    key_id: str,
+    name: str,
+    role: str,
+    auth_method: str = "api_key",
+    tenant_id: str = "default",
+) -> Principal:
     return Principal(
         key_id=key_id,
         name=name,
         role=role,
         permissions=ROLE_PERMISSIONS.get(role, frozenset()),
         auth_method=auth_method,
+        tenant_id=tenant_id,
     )
 
 
