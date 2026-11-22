@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.oidc import looks_like_jwt, principal_from_token
 from app.core.request_context import principal_key_id_var
 from app.core.security import ANONYMOUS_ADMIN, Principal
 from app.db.session import get_db
@@ -29,7 +30,11 @@ async def get_principal(
     x_api_key: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> Principal:
-    """解析请求身份，并做每密钥的请求限流。认证关闭时退化为匿名管理员（仅限本地开发）。"""
+    """解析请求身份，并做每密钥的请求限流。认证关闭时退化为匿名管理员（仅限本地开发）。
+
+    凭据带两个点就按 JWT（OIDC）处理，否则按 API Key 查库：
+    我们自己的 API Key 形如 `oak_xxx`，不含点，两者不会混淆。
+    """
     if not settings.auth_enabled:
         principal = ANONYMOUS_ADMIN
     else:
@@ -37,15 +42,17 @@ async def get_principal(
         if raw is None:
             raise AppError(
                 ErrorCode.UNAUTHORIZED,
-                "缺少 API Key：请使用 Authorization: Bearer <key> 或 X-API-Key 头",
+                "缺少凭据：请使用 Authorization: Bearer <API Key 或 JWT> 或 X-API-Key 头",
                 status_code=401,
             )
 
-        authenticated = ApiKeyService(db).authenticate(raw)
-        if authenticated is None:
-            raise AppError(ErrorCode.UNAUTHORIZED, "API Key 无效或已停用", status_code=401)
-        principal = authenticated
-
+        if looks_like_jwt(raw):
+            principal = await principal_from_token(raw)
+        else:
+            authenticated = ApiKeyService(db).authenticate(raw)
+            if authenticated is None:
+                raise AppError(ErrorCode.UNAUTHORIZED, "API Key 无效或已停用", status_code=401)
+            principal = authenticated
     # 认证通过后才限流：拿不到身份的请求没必要占用桶。
     await enforce_rate_limit(principal.key_id)
     principal_key_id_var.set(principal.key_id)

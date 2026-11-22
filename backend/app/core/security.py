@@ -50,6 +50,8 @@ class Principal:
     name: str
     role: str
     permissions: frozenset[str] = field(default_factory=frozenset)
+    # 凭据来源：api_key / oidc / none（认证关闭时的匿名）
+    auth_method: str = "api_key"
 
     def can(self, permission: str) -> bool:
         return permission in self.permissions
@@ -65,15 +67,17 @@ ANONYMOUS_ADMIN = Principal(
     name="anonymous",
     role="admin",
     permissions=ALL_PERMISSIONS,
+    auth_method="none",
 )
 
 
-def principal_for(*, key_id: str, name: str, role: str) -> Principal:
+def principal_for(*, key_id: str, name: str, role: str, auth_method: str = "api_key") -> Principal:
     return Principal(
         key_id=key_id,
         name=name,
         role=role,
         permissions=ROLE_PERMISSIONS.get(role, frozenset()),
+        auth_method=auth_method,
     )
 
 

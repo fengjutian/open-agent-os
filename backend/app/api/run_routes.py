@@ -32,6 +32,7 @@ def whoami(principal: Principal = Depends(get_principal)):
         name=principal.name,
         role=principal.role,
         permissions=sorted(principal.permissions),
+        auth_method=principal.auth_method,
     )
 
 

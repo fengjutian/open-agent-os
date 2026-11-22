@@ -9,3 +9,5 @@ jsonschema==4.26.0
 psycopg[binary]==3.3.9
 # Redis 限流后端（RATE_LIMIT_BACKEND=redis）
 redis==6.4.0
+# OIDC / JWT 验签（RS256 需要 cryptography）
+PyJWT[crypto]==2.13.0

@@ -6,14 +6,17 @@ Base URL：`/api/v1`
 
 ### 认证
 
-除 `/health`、`/docs`、`/openapi.json` 外，所有接口都需要 API Key：
+除 `/health`、`/docs`、`/openapi.json` 外，所有接口都需要凭据：
 
 ```http
 Authorization: Bearer oak_xxxxxxxx
 ```
 
-或 `X-API-Key: oak_xxxxxxxx`。缺失或无效返回 401 `unauthorized`，
-权限不足返回 403 `forbidden`。
+或 `X-API-Key: oak_xxxxxxxx`。**如果 Bearer 的值含两个点，会被当作 JWT 校验**
+（需服务端配置 `OIDC_ISSUER` / `OIDC_AUDIENCE` / `OIDC_JWKS_URL`）。
+
+缺失或无效返回 401 `unauthorized`，权限不足返回 403 `forbidden`。
+`GET /me` 的 `auth_method` 会告诉你这次请求用的是哪种凭据。
 
 角色权限矩阵（全局角色，不支持资源级授权）：
 

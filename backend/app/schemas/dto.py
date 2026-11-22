@@ -288,6 +288,8 @@ class MeRead(BaseModel):
     name: str
     role: str
     permissions: list[str]
+    # api_key / oidc / none
+    auth_method: str = "api_key"
 
 
 # ---------------------------------------------------------------------------

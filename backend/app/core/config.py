@@ -33,8 +33,17 @@ class Settings(BaseSettings):
     max_tool_iterations: int = 4
     # 认证开关。默认开启；只有本地开发才应该关掉（关掉等于匿名可写）。
     auth_enabled: bool = True
-    # 首次启动时用于引导管理员密钥；留空则自动生成并在日志中打印一次。
+    # 初始管理员密钥。留空则首次启动自动生成并在日志中打印一次。
     bootstrap_admin_api_key: str = ""
+    # ---- OIDC / JWT（可选，与 API Key 并存）----
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""
+    # 从哪个 claim 取角色；取不到或非法时回落到 oidc_default_role
+    oidc_role_claim: str = "role"
+    oidc_default_role: str = "viewer"
+    oidc_algorithms: str = "RS256"
+    oidc_jwks_cache_seconds: int = 300
     # 每个密钥每分钟允许的请求数；0 表示不限流。
     rate_limit_per_minute: int = 120
     # 限流后端：memory（进程内）或 redis（多副本共享）
@@ -58,6 +67,15 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def oidc_enabled(self) -> bool:
+        """三项都配好才算启用 OIDC。"""
+        return bool(self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url)
+
+    @property
+    def oidc_algorithm_list(self) -> list[str]:
+        return [item.strip() for item in self.oidc_algorithms.split(",") if item.strip()]
 
 
 settings = Settings()

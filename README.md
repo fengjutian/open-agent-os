@@ -336,6 +336,35 @@ curl -X PATCH localhost:8000/api/v1/agents/<AGENT_ID> \
 - 只有 admin 能写技能（`write:skills`）；开发者可以引用已有技能。
 - Agent 按**名称**引用技能而不是外键：代价是重命名会断引用，因此写入时校验存在性。
 
+## OIDC / JWT 认证（可选）
+
+除了 API Key，还可以直接接企业 IdP。三项配齐即启用：
+
+```bash
+OIDC_ISSUER=https://idp.example.com
+OIDC_AUDIENCE=agent-platform
+OIDC_JWKS_URL=https://idp.example.com/.well-known/jwks.json
+```
+
+之后请求可以直接带 IdP 签发的 access token：
+
+```bash
+curl -H "Authorization: Bearer $ACCESS_TOKEN" localhost:8000/api/v1/agents
+```
+
+- **与 API Key 并存**：凭据带两个点就按 JWT 处理，否则按 API Key 查库
+  （我们的 Key 形如 `oak_xxx`，不含点，两者不会混淆）。
+- 只信任 IdP 的 JWKS，本地不存公钥；JWKS 有 TTL 缓存，遇到未知 `kid`
+  会**强制刷新一次**再判定失败——IdP 轮换密钥不需要重启服务。
+- 校验 `signature`、`iss`、`aud`、`exp`、`nbf`，`sub/exp/iss/aud` 为必需字段。
+- 角色来自 `OIDC_ROLE_CLAIM`（默认 `role`），只接受 `admin`/`developer`/`viewer`；
+  取不到或不认识的值**降级为** `OIDC_DEFAULT_ROLE`（默认 `viewer`），
+  避免 IdP 加了个新角色就把所有人挡在门外。
+- `GET /api/v1/me` 会返回 `auth_method`（`api_key` / `oidc` / `none`），便于排查。
+
+> 目前只做了**认证**：`sub` 只用于审计和 Run 归属，还没有组织/租户隔离。
+> 也就是说所有通过认证的身份看到的是同一份数据。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL
@@ -388,6 +417,7 @@ REDIS_URL=redis://localhost:6379/0
 - 工具注册表 + JSON Schema 校验 + 服务端策略（deny-by-default）+ 审计
 - Agent Loop 工具调用（轮次上限可配）
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
+- OIDC / JWT 认证（与 API Key 并存，JWKS 验签）
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额（可切换 Redis 后端）
 - PostgreSQL / SQLite 双支持（同一套迁移）
