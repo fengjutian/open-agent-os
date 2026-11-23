@@ -1,6 +1,9 @@
 import {useCallback,useEffect,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,AuditLog,Me,Run,RunEvent,Tool} from "./types";
+import type {Agent,AgentTool,AuditLog,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+
+const ROLES = ["viewer", "developer", "admin"] as const;
+type Role = (typeof ROLES)[number];
 
 const DEFAULT_SCHEMA = `{
   "type": "object",
@@ -213,6 +216,147 @@ export function RunsPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)
           {!events.length && <p className="muted">该运行没有事件。</p>}
         </>}
         {!selected && <p className="muted">从左侧选择一条运行记录，查看它做过什么。</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+export function OrganizationPanel({me,onError}:{me:Me|null;onError:(err:unknown)=>void}) {
+  const [tenant,setTenant]=useState<Tenant|null>(null);
+  const [members,setMembers]=useState<Membership[]>([]);
+  const [subject,setSubject]=useState("");
+  const [role,setRole]=useState<Role>("viewer");
+  const [newTenantId,setNewTenantId]=useState("");
+  const [newTenantName,setNewTenantName]=useState("");
+  const [busy,setBusy]=useState(false);
+
+  const canManage = me?.permissions.includes("write:members") ?? false;
+
+  const reload = useCallback(async () => {
+    try {
+      const [current,page] = await Promise.all([api.currentTenant(),api.memberships()]);
+      setTenant(current);
+      setMembers(page.items);
+    } catch(err) { onError(err); }
+  },[onError]);
+
+  useEffect(() => { reload(); },[reload]);
+
+  async function addMember(event:React.FormEvent) {
+    event.preventDefault();
+    if(!subject.trim()) return;
+    setBusy(true);
+    try {
+      await api.addMembership({subject:subject.trim(),role});
+      setSubject("");
+      await reload();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function changeRole(membership:Membership,next:Role) {
+    setBusy(true);
+    try {
+      await api.updateMembership(membership.id,next);
+      await reload();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(membership:Membership) {
+    setBusy(true);
+    try {
+      await api.removeMembership(membership.id);
+      await reload();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function createTenant(event:React.FormEvent) {
+    event.preventDefault();
+    if(!newTenantId.trim()) return;
+    setBusy(true);
+    try {
+      await api.createTenant({
+        id:newTenantId.trim(),
+        name:newTenantName.trim() || newTenantId.trim(),
+      });
+      setNewTenantId("");
+      setNewTenantName("");
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>当前租户</h3>
+      {tenant
+        ? <div className="row">
+            <div>
+              <b>{tenant.name}</b>
+              <small className="muted"><code>{tenant.id}</code> · {tenant.status}</small>
+            </div>
+            <span className={tenant.status==="active"?"ok":"no"}>●</span>
+          </div>
+        : <p className="muted">加载中…</p>}
+
+      <h3>开通新租户</h3>
+      {canManage
+        ? <form className="stack" onSubmit={createTenant}>
+            <input className="field" value={newTenantId} onChange={e => setNewTenantId(e.target.value)}
+              placeholder="租户 ID，例如 acme" />
+            <input className="field" value={newTenantName} onChange={e => setNewTenantName(e.target.value)}
+              placeholder="显示名称（可选）" />
+            <small className="muted">
+              开通后还需要为该租户签发 API Key（POST /api-keys 带 tenant_id）才能使用。
+            </small>
+            <button className="primary" type="submit" disabled={busy || !newTenantId.trim()}>开通租户</button>
+          </form>
+        : <p className="muted">当前角色无权开通租户（需要 admin）。</p>}
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>成员</b><small>OIDC 用户的角色以此处为准，会覆盖 token 里的 claim</small></div>
+        <span>● {me?.role ?? "?"}</span>
+      </div>
+      <div className="panel-body">
+        {canManage
+          ? <form className="stack" onSubmit={addMember}>
+              <div className="inline-form">
+                <input className="field" value={subject} onChange={e => setSubject(e.target.value)}
+                  placeholder="成员标识，例如 oidc:user-1" />
+                <select className="field compact" value={role} onChange={e => setRole(e.target.value as Role)}>
+                  {ROLES.map(item => <option key={item} value={item}>{item}</option>)}
+                </select>
+                <button className="primary" type="submit" disabled={busy || !subject.trim()}>加入</button>
+              </div>
+            </form>
+          : <p className="muted">当前角色无权管理成员（需要 admin）。</p>}
+
+        <table className="table">
+          <thead>
+            <tr><th>成员</th><th>角色</th><th>加入时间</th><th></th></tr>
+          </thead>
+          <tbody>
+            {members.map(item => <tr key={item.id}>
+              <td><code>{item.subject}</code></td>
+              <td>
+                {canManage
+                  ? <select className="field compact" value={item.role} disabled={busy}
+                      onChange={e => changeRole(item,e.target.value as Role)}>
+                      {ROLES.map(option => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  : item.role}
+              </td>
+              <td className="muted small">{time(item.created_at)}</td>
+              <td className="actions">
+                <button className="ghost" disabled={!canManage || busy} onClick={() => remove(item)}>移除</button>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!members.length && <p className="muted">该租户还没有成员。</p>}
       </div>
     </section>
   </div>;

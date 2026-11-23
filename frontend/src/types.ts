@@ -53,3 +53,11 @@ export interface RunEvent {
  id:string; run_id:string; seq:number; type:string;
  payload:Record<string,unknown>; created_at:string;
 }
+
+export interface Tenant {
+ id:string; name:string; status:"active"|"disabled"|string; created_at:string;
+}
+
+export interface Membership {
+ id:string; subject:string; role:"admin"|"developer"|"viewer"|string; created_at:string;
+}

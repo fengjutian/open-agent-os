@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,AuditLog,Conversation,Me,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tool} from "./types";
+import type {Agent,AgentTool,AuditLog,Conversation,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -76,6 +76,16 @@ export const api={
  runs:(agentId?:string,limit=20)=>
   request<Page<Run>>(`/runs?limit=${limit}${agentId?`&agent_id=${encodeURIComponent(agentId)}`:""}`),
  runEvents:(runId:string)=>request<Page<RunEvent>>(`/runs/${runId}/events?limit=100`),
+
+ currentTenant:()=>request<Tenant>("/tenants/current"),
+ createTenant:(data:{id:string;name:string})=>
+  request<Tenant>("/tenants",{method:"POST",body:JSON.stringify(data)}),
+ memberships:(limit=100)=>request<Page<Membership>>(`/memberships?limit=${limit}`),
+ addMembership:(data:{subject:string;role:string})=>
+  request<Membership>("/memberships",{method:"POST",body:JSON.stringify(data)}),
+ updateMembership:(id:string,role:string)=>
+  request<Membership>(`/memberships/${id}`,{method:"PATCH",body:JSON.stringify({role})}),
+ removeMembership:(id:string)=>request<void>(`/memberships/${id}`,{method:"DELETE"}),
 };
 
 /** 流式回调：服务端按 SSE 事件推送。 */
