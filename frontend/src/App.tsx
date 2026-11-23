@@ -247,6 +247,10 @@ export default function App(){
    </div>}
   </main>
 
-  {error&&<button className="error" onClick={()=>setError("")}>{error} ×</button>}
+  {error&&<div className="error" role="alert">
+   <b>操作失败</b>
+   <span>{error}</span>
+   <button className="link" onClick={()=>setError("")} aria-label="关闭">×</button>
+  </div>}
  </div>;
 }

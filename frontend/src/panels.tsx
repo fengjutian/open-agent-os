@@ -36,6 +36,7 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
   const [description,setDescription]=useState("");
   const [schema,setSchema]=useState(DEFAULT_SCHEMA);
   const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
 
   const canWriteTools = me?.permissions.includes("write:tools") ?? false;
   const canWritePolicy = me?.permissions.includes("write:policy") ?? false;
@@ -46,6 +47,7 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
       setTools(toolPage.items);
       setAudits(auditPage.items);
     } catch(err) { onError(err); }
+    finally { setLoading(false); }
   },[onError]);
 
   const reloadAgentTools = useCallback(async (id:string) => {
@@ -116,7 +118,7 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
           {tool.enabled ? "停用" : "启用"}
         </button>
       </div>)}
-      {!tools.length && <p className="muted">还没有注册任何工具。</p>}
+      {!tools.length && <p className="muted">{loading ? "加载中…" : "还没有注册任何工具。"}</p>}
     </section>
 
     <section className="chat">
@@ -147,7 +149,6 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
           </tbody>
         </table>
         {!agentTools.length && <p className="muted">该 Agent 名下还没有可展示的工具。</p>}
-
         <h3>最近审计</h3>
         <ul className="feed">
           {audits.map(entry => <li key={entry.id}>
@@ -155,7 +156,7 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
             <small className="muted"> · {entry.actor} · {time(entry.created_at)}</small>
           </li>)}
         </ul>
-        {!audits.length && <p className="muted">暂无审计记录。</p>}
+        {!audits.length && <p className="muted">{loading ? "加载中…" : "暂无审计记录。"}</p>}
       </div>
     </section>
   </div>;
@@ -166,10 +167,12 @@ export function RunsPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)
   const [agentId,setAgentId]=useState("");
   const [selected,setSelected]=useState<Run|null>(null);
   const [events,setEvents]=useState<RunEvent[]>([]);
+  const [loading,setLoading]=useState(true);
 
   const reload = useCallback(async () => {
     try { setRuns((await api.runs(agentId || undefined,30)).items); }
     catch(err) { onError(err); }
+    finally { setLoading(false); }
   },[agentId,onError]);
 
   useEffect(() => { reload(); },[reload]);
@@ -192,7 +195,7 @@ export function RunsPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)
         <span className={run.status==="succeeded"?"ok":run.status==="failed"?"no":"muted"}>●</span> {shortId(run.id)}
         <small className="muted"> · {time(run.started_at)}</small>
       </button>)}
-      {!runs.length && <p className="muted">还没有运行记录。发一条消息即可产生。</p>}
+      {!runs.length && <p className="muted">{loading ? "加载中…" : "还没有运行记录。发一条消息即可产生。"}</p>}
     </section>
 
     <section className="chat">
@@ -229,6 +232,7 @@ export function OrganizationPanel({me,onError}:{me:Me|null;onError:(err:unknown)
   const [newTenantId,setNewTenantId]=useState("");
   const [newTenantName,setNewTenantName]=useState("");
   const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
 
   const canManage = me?.permissions.includes("write:members") ?? false;
 
@@ -238,6 +242,7 @@ export function OrganizationPanel({me,onError}:{me:Me|null;onError:(err:unknown)
       setTenant(current);
       setMembers(page.items);
     } catch(err) { onError(err); }
+    finally { setLoading(false); }
   },[onError]);
 
   useEffect(() => { reload(); },[reload]);
@@ -356,7 +361,7 @@ export function OrganizationPanel({me,onError}:{me:Me|null;onError:(err:unknown)
             </tr>)}
           </tbody>
         </table>
-        {!members.length && <p className="muted">该租户还没有成员。</p>}
+        {!members.length && <p className="muted">{loading ? "加载中…" : "该租户还没有成员。"}</p>}
       </div>
     </section>
   </div>;

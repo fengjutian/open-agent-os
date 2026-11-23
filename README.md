@@ -263,6 +263,13 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 打开 http://localhost:5173 会先要求输入 API Key（存在浏览器本地）。
 界面里没有租户切换：租户由你输入的密钥决定。
 
+细节处理：
+
+- 失败操作以浮动提示呈现（带 `request_id`，便于对照后端日志），可手动关闭。
+- 列表在首次加载时显示「加载中…」，避免把「还没加载」误读成「没有数据」。
+- 窄屏（≤1024px）侧栏变成顶部条、双栏变单栏；≤640px 进一步隐藏次要信息，
+  表格改为横向滚动，不撑破布局。
+
 
 ## MCP 工具（V0.2）
 
