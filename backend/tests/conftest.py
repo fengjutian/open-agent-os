@@ -37,6 +37,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.telemetry import init_telemetry  # noqa: E402
@@ -44,6 +45,7 @@ from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.api_keys import ApiKeyService  # noqa: E402
 from app.services.rate_limit import reset_rate_limiter  # noqa: E402
+from app.services.tenants import ensure_tenant_exists  # noqa: E402
 
 SPAN_EXPORTER = InMemorySpanExporter()
 METRIC_READER = InMemoryMetricReader()
@@ -83,10 +85,24 @@ def clear_spans(telemetry):
 
 @pytest.fixture(autouse=True)
 def clean_tables(client):
-    """每个用例前清空业务表，保证用例之间互不影响。"""
+    """每个用例前清空业务表，保证用例之间互不影响。
+
+    租户表是参考数据：不能整体清空（默认租户必须一直在），
+    但要删掉用例自己建的租户，避免「重复创建」类断言被上一个用例污染。
+    """
     with engine.begin() as connection:
         for table in reversed(Base.metadata.sorted_tables):
+            if table.name in {"tenants", "alembic_version"}:
+                continue
             connection.execute(table.delete())
+        connection.execute(text("DELETE FROM tenants WHERE id != 'default'"))
+        connection.execute(
+            text(
+                "INSERT INTO tenants (id, name, status, created_at, updated_at) "
+                "SELECT 'default', 'Default', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                "WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE id = 'default')"
+            )
+        )
     yield
 
 
@@ -117,6 +133,21 @@ def make_key():
         return _create_key(role)
 
     return _factory
+
+
+@pytest.fixture
+def tenant_key():
+    """按租户签发 admin 密钥（租户不存在时先创建）。"""
+
+    def _make(tenant: str, role: str = "admin") -> str:
+        with SessionLocal() as db:
+            ensure_tenant_exists(db, tenant, name=tenant)
+            _, raw = ApiKeyService(db).create(
+                name=f"k-{tenant}-{uuid4().hex[:8]}", role=role, tenant_id=tenant
+            )
+        return raw
+
+    return _make
 
 
 @pytest.fixture

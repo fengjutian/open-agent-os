@@ -16,6 +16,7 @@ from app.core.tenancy import set_tenant
 from app.db.session import get_db
 from app.services.api_keys import ApiKeyService
 from app.services.rate_limit import enforce_rate_limit
+from app.services.tenants import assert_tenant_active, resolve_membership
 
 
 def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None:
@@ -59,6 +60,10 @@ async def get_principal(
     principal_key_id_var.set(principal.key_id)
     # 认证完成后才知道租户；之后所有查询都会被限制在该租户内。
     set_tenant(principal.tenant_id)
+    # 停用的租户立即拒绝，且不区分「不存在」与「已停用」。
+    assert_tenant_active(db, principal.tenant_id)
+    # 成员关系可以覆盖凭据里的角色（平台按租户授权）。
+    principal = resolve_membership(db, principal)
     return principal
 
 

@@ -12,18 +12,21 @@ def now_utc():
     return datetime.now(UTC)
 
 
-class TenantMixin:
-    """所有业务表都带 tenant_id。
+class TenantScoped(Base):
+    """所有带租户的模型的抽象基类。
 
-    过滤不靠每条查询自己加 where，而是由 app/db/tenancy.py 的 ORM 事件统一施加。
-    写入时默认取当前请求的租户。
+    用**抽象映射基类**而不是 mixin，是为了让 `with_loader_criteria` 精确地只作用于
+    「有租户的实体」。如果把 `Base` 传进去，Tenant 这类全局表也会被纳入，而条件函数
+    返回 None 时 SQLAlchemy 生成的是 `WHERE NULL`——那会把表整个滤空。
     """
+
+    __abstract__ = True
 
     tenant_id: Mapped[str] = mapped_column(
         String(36), default=current_tenant, nullable=False, index=True
     )
 
-class Agent(TenantMixin, Base):
+class Agent(TenantScoped):
     __tablename__ = "agents"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -40,7 +43,7 @@ class Agent(TenantMixin, Base):
         back_populates="agent", cascade="all, delete-orphan"
     )
 
-class Conversation(TenantMixin, Base):
+class Conversation(TenantScoped):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
@@ -52,7 +55,7 @@ class Conversation(TenantMixin, Base):
         back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
-class Message(TenantMixin, Base):
+class Message(TenantScoped):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
@@ -62,7 +65,7 @@ class Message(TenantMixin, Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
-class Run(TenantMixin, Base):
+class Run(TenantScoped):
     """一次 Agent 运行的主体记录。
 
     run_id 就是这张表的主键；此前它只存在于日志里，现在可以按 id 回溯整条链路。
@@ -87,7 +90,7 @@ class Run(TenantMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class RunEvent(TenantMixin, Base):
+class RunEvent(TenantScoped):
     """运行过程中的事件流（追加写，不修改）。
 
     不建到 runs 的外键：与审计同一思路，事件记录的寿命不依赖业务数据的生命周期。
@@ -103,7 +106,7 @@ class RunEvent(TenantMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class Skill(TenantMixin, Base):
+class Skill(TenantScoped):
     """可复用的指令包。
 
     一个 Skill 就是一段被命名的「行为约定」，可以被多个 Agent 引用。
@@ -123,7 +126,41 @@ class Skill(TenantMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class ApiKey(TenantMixin, Base):
+class Tenant(Base):
+    """组织（租户）。
+
+    它本身就是隔离边界，因此**不**继承 TenantMixin——它没有上级租户。
+    """
+
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # active / disabled：停用后该租户的所有请求都会被拒
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class Membership(TenantScoped):
+    """成员关系：把某个身份（OIDC subject）绑到租户内的角色。
+
+    有了它，角色就不必完全信任 IdP 的 claim——平台可以按租户覆盖。
+    API Key 本身带角色，不需要 membership。
+    """
+
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("tenant_id", "subject", name="uq_memberships_tenant_subject"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    # 与 Principal.key_id 对齐，例如 oidc:user-1
+    subject: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ApiKey(TenantScoped):
     """API 密钥。
 
     只保存 SHA-256 摘要，明文仅在创建/引导时返回或打印一次。
@@ -144,7 +181,7 @@ class ApiKey(TenantMixin, Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class ToolDefinition(TenantMixin, Base):
+class ToolDefinition(TenantScoped):
     """工具注册表条目。
 
     模型只能「看到」注册在这里的工具；未注册的工具名一律不存在。
@@ -175,7 +212,7 @@ class ToolDefinition(TenantMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class PolicyRule(TenantMixin, Base):
+class PolicyRule(TenantScoped):
     """服务端策略规则。
 
     agent_id 为空表示全局规则；priority 越大越优先；同优先级下 deny 胜过 allow。
@@ -197,7 +234,7 @@ class PolicyRule(TenantMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class ToolInvocation(TenantMixin, Base):
+class ToolInvocation(TenantScoped):
     """一次工具调用的持久记录（无论成功、被拒还是失败）。
 
     故意不建到 agents 的外键：审计记录不应随 Agent 删除而消失。
@@ -219,7 +256,7 @@ class ToolInvocation(TenantMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class AuditLog(TenantMixin, Base):
+class AuditLog(TenantScoped):
     """审计事件。同样不挂外键，保证记录不可被级联删除。"""
 
     __tablename__ = "audit_logs"

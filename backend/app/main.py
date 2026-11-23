@@ -10,6 +10,7 @@ from app.api.middleware import RequestContextMiddleware
 from app.api.routes import router
 from app.api.run_routes import router as run_router
 from app.api.skill_routes import router as skill_router
+from app.api.tenant_routes import router as tenant_router
 from app.api.tool_routes import router as tool_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -18,6 +19,7 @@ from app.db.migrate import run_migrations
 from app.db.session import SessionLocal
 from app.models import entities  # noqa: F401  注册 SQLAlchemy 模型
 from app.services.api_keys import ApiKeyService
+from app.services.tenants import bootstrap_default_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,8 @@ def bootstrap_admin_key() -> None:
         return
 
     with SessionLocal() as db:
+        # 先确保默认租户存在，否则引导密钥会因为租户校验失败
+        bootstrap_default_tenant(db)
         raw = ApiKeyService(db).ensure_bootstrap_admin(settings.bootstrap_admin_api_key)
 
     if raw:
@@ -77,6 +81,7 @@ app.include_router(tool_router)
 app.include_router(auth_router)
 app.include_router(run_router)
 app.include_router(skill_router)
+app.include_router(tenant_router)
 
 
 @app.get("/health")

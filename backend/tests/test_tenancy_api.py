@@ -2,25 +2,6 @@
 
 from uuid import uuid4
 
-import pytest
-
-from app.db.session import SessionLocal
-from app.services.api_keys import ApiKeyService
-
-
-@pytest.fixture
-def tenant_key():
-    """按租户签发 admin 密钥。"""
-
-    def _make(tenant: str, role: str = "admin") -> str:
-        with SessionLocal() as db:
-            _, raw = ApiKeyService(db).create(
-                name=f"k-{tenant}-{uuid4().hex[:8]}", role=role, tenant_id=tenant
-            )
-        return raw
-
-    return _make
-
 
 def _h(raw: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {raw}"}
@@ -205,6 +186,12 @@ def test_key_created_for_tenant_lands_in_that_tenant(client, tenant_key):
 
 def test_admin_can_provision_key_for_another_tenant(client, tenant_key):
     key_a = tenant_key("tenant-a")
+
+    # 新租户必须先开通
+    created = client.post(
+        "/api/v1/tenants", json={"id": "tenant-c", "name": "Tenant C"}, headers=_h(key_a)
+    )
+    assert created.status_code == 201, created.text
 
     response = client.post(
         "/api/v1/api-keys",

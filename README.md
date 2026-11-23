@@ -365,6 +365,46 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" localhost:8000/api/v1/agents
 > 目前只做了**认证**：`sub` 只用于审计和 Run 归属，还没有组织/租户隔离。
 > 也就是说所有通过认证的身份看到的是同一份数据。
 
+## 组织与成员
+
+租户（组织）现在是**有生命周期、有成员**的实体，而不再只是一个字符串：
+
+```bash
+# 1. 开通租户（admin）
+curl -X POST localhost:8000/api/v1/tenants -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"id":"acme","name":"Acme Inc"}'
+
+# 2. 为该租户签发第一把密钥（admin）
+curl -X POST localhost:8000/api/v1/api-keys -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"acme-admin","role":"admin","tenant_id":"acme"}'
+
+# 3. 把 OIDC 用户加进租户并指定角色
+curl -X POST localhost:8000/api/v1/memberships -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"subject":"oidc:user-1","role":"developer"}'
+```
+
+### 成员关系会覆盖 IdP 的角色
+
+OIDC 用户的角色来自 token 的 claim，但**如果他是某个租户的成员，则以成员关系为准**：
+
+```text
+token.role = admin   +   membership.role = viewer   →   实际权限 = viewer
+```
+
+这样平台可以在不改 IdP 的前提下按租户调整授权。不设成员时沿用 claim 角色；
+把 `OIDC_REQUIRE_MEMBERSHIP=true` 打开后，**没有成员的 OIDC 用户会被直接拒绝**（403），
+适合"必须显式邀请才能进入"的场景。
+
+### 其它行为
+
+- `GET /tenants/current` 返回当前租户；`GET/POST/PATCH/DELETE /memberships` 管理成员，
+  全部只在**自己所在租户**内生效。
+- 为不存在的租户发密钥会返回 404——必须先开通租户。
+- 租户被停用（`status=disabled`）后，该租户的所有请求立即 403。
+- 已知取舍：**任何 admin 都能开通新租户**（没有平台级超管角色）。
+  自托管场景可接受，但在多组织托管场景需要额外限制。
+
 ## 多租户隔离
 
 所有业务表都带 `tenant_id`，请求的租户由凭据决定：
@@ -515,6 +555,7 @@ REDIS_URL=redis://localhost:6379/0
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
 - OIDC / JWT 认证（与 API Key 并存，JWKS 验签）
 - 多租户隔离（数据层强制过滤，跨租户 404）
+- 组织与成员（租户生命周期、成员关系覆盖 IdP 角色）
 - OpenTelemetry 链路 / 指标 / 日志关联（默认关闭，可接 OTLP）
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额（可切换 Redis 后端）

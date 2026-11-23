@@ -17,7 +17,7 @@ from sqlalchemy import event, literal
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from app.core.tenancy import current_tenant
-from app.db.session import Base
+from app.models.entities import TenantScoped
 
 INCLUDE_ALL_TENANTS = "include_all_tenants"
 
@@ -35,11 +35,10 @@ def _apply_tenant_scope(execute_state) -> None:  # noqa: ANN001 - SQLAlchemy 事
     # 因此先在 lambda 外把租户做成 literal（BindParameter），再在条件里引用它。
     tenant_value = literal(current_tenant())
 
-    def _criteria(cls):
-        if not hasattr(cls, "tenant_id"):
-            return None
-        return cls.tenant_id == tenant_value
-
     execute_state.statement = execute_state.statement.options(
-        with_loader_criteria(Base, _criteria, include_aliases=True)
+        with_loader_criteria(
+            TenantScoped,
+            lambda cls: cls.tenant_id == tenant_value,
+            include_aliases=True,
+        )
     )

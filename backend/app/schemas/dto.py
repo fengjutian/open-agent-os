@@ -355,3 +355,41 @@ class SkillRead(BaseModel):
     enabled: bool
     created_at: UtcDatetime
     updated_at: UtcDatetime
+
+
+# ---------------------------------------------------------------------------
+# 租户与成员
+# ---------------------------------------------------------------------------
+
+TENANT_ID_PATTERN = r"^[a-z][a-z0-9-]{1,35}$"
+
+
+class TenantCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=36, pattern=TENANT_ID_PATTERN)
+    name: str = Field(min_length=1, max_length=120)
+
+
+class TenantRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    status: str
+    created_at: UtcDatetime
+
+
+class MembershipCreate(BaseModel):
+    # 与 Principal.key_id 对齐，例如 oidc:user-1
+    subject: str = Field(min_length=1, max_length=200)
+    role: Literal["admin", "developer", "viewer"] = "viewer"
+
+
+class MembershipUpdate(BaseModel):
+    role: Literal["admin", "developer", "viewer"]
+
+
+class MembershipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    subject: str
+    role: str
+    created_at: UtcDatetime

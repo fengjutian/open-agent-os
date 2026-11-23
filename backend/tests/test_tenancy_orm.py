@@ -80,15 +80,28 @@ def test_writes_get_current_tenant():
 
 
 def test_every_mapped_class_has_tenant_id():
-    """结构性防呆：新增模型若忘记继承 TenantMixin，这里会失败。"""
-    from app.db.session import Base
+    """结构性防呆：新增模型若忘记继承 TenantScoped，这里会失败。
 
-    missing = [
-        mapper.class_.__name__
-        for mapper in Base.registry.mappers
-        if "tenant_id" not in mapper.class_.__table__.columns
-    ]
+    `Tenant` 是隔离边界本身，不需要（也不该有）tenant_id。
+    """
+    from app.db.session import Base
+    from app.models.entities import Tenant, TenantScoped
+
+    global_models = {Tenant}
+    missing: list[str] = []
+    not_scoped: list[str] = []
+
+    for mapper in Base.registry.mappers:
+        cls = mapper.class_
+        if cls in global_models:
+            continue
+        if "tenant_id" not in cls.__table__.columns:
+            missing.append(cls.__name__)
+        if not issubclass(cls, TenantScoped):
+            not_scoped.append(cls.__name__)
+
     assert missing == [], f"以下模型缺少 tenant_id: {missing}"
+    assert not_scoped == [], f"以下模型没有继承 TenantScoped（不会被租户过滤）: {not_scoped}"
 
 
 @pytest.mark.parametrize("tenant", ["a", "b", "default"])

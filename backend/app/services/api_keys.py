@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.core.tenancy import current_tenant
 from app.db.tenancy import INCLUDE_ALL_TENANTS
-from app.models.entities import ApiKey, now_utc
+from app.models.entities import ApiKey, Tenant, now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +47,20 @@ class ApiKeyService:
             raise AppError(ErrorCode.CONFLICT, f"API Key 名称 {name} 已存在", status_code=409)
 
         raw = generate_api_key()
+        target_tenant = tenant_id or current_tenant()
+        if self._db.get(Tenant, target_tenant) is None:
+            raise AppError(
+                ErrorCode.NOT_FOUND,
+                f"租户 {target_tenant} 不存在，请先创建租户",
+                status_code=404,
+            )
         record = ApiKey(
             name=name,
             key_prefix=key_prefix(raw),
             key_hash=hash_api_key(raw),
             role=role,
             enabled=True,
-            tenant_id=tenant_id or current_tenant(),
+            tenant_id=target_tenant,
         )
         self._db.add(record)
         self._db.commit()

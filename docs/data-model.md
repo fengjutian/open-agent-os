@@ -47,8 +47,16 @@
 
 ## 多租户
 所有业务表（agents、conversations、messages、tool_definitions、policy_rules、
-tool_invocations、audit_logs、api_keys、runs、run_events、skills）都有
+tool_invocations、audit_logs、api_keys、runs、run_events、skills、memberships）都有
 `tenant_id`（默认 `default`，带索引）。
+
+它们都继承抽象映射基类 `TenantScoped`——租户过滤通过
+`with_loader_criteria(TenantScoped, ...)` 精确作用于这些实体，而不会波及全局表。
+
+- `Tenant`：id（slug）、name、status（active/disabled）、created_at、updated_at。
+  **不**继承 TenantScoped——它就是隔离边界本身。
+- `Membership`：(tenant_id, subject) 唯一，subject 与 `Principal.key_id` 对齐，
+  带 role。用于按租户覆盖 IdP 声称的角色。
 
 唯一约束从「全局唯一」改为「租户内唯一」：`tool_definitions` 与 `skills` 使用
 `(tenant_id, name)`。`api_keys.name` 保持全局唯一，`api_keys.key_hash` 全局唯一

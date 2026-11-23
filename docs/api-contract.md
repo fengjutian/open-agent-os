@@ -26,6 +26,21 @@ Authorization: Bearer oak_xxxxxxxx
 | `developer` | `read`、`write:agents`、`invoke:tools` |
 | `admin` | 全部，含 `write:tools`、`write:policy`、`write:keys` |
 
+### 组织与成员
+
+- `POST /tenants`：开通租户，body `{ id, name }`（`id` 形如 `acme`，创建后不可改）。
+  重名 409，命名不合法 422。需要 `write:members`（仅 admin）。
+- `GET /tenants/current`：当前租户。
+- `GET /memberships`：当前租户的成员列表（分页）。
+- `POST /memberships`：`{ subject, role }`，`subject` 与 `Principal.key_id` 对齐
+  （OIDC 用户形如 `oidc:user-1`）；重复 409。
+- `PATCH /memberships/{id}`：`{ role }`。
+- `DELETE /memberships/{id}`：移出租户，204。
+
+成员的 `role` 会**覆盖**凭据里的角色；`OIDC_REQUIRE_MEMBERSHIP=true` 时，
+没有成员的 OIDC 用户一律 403。为不存在的租户签发密钥返回 404；
+租户 `status=disabled` 后该租户的所有请求 403。
+
 ### 租户
 
 所有资源都属于某个租户。租户由凭据决定（API Key 的归属 / OIDC 的 `tenant` claim），

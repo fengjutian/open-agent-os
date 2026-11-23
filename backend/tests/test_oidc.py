@@ -254,3 +254,20 @@ def test_api_key_still_works_when_oidc_enabled(client, oidc_env):
     assert client.get("/api/v1/agents").status_code == 200
     me = client.get("/api/v1/me").json()
     assert me["auth_method"] == "api_key"
+
+
+def test_membership_overrides_oidc_claimed_role(oidc_env, private_pem):
+    """IdP 说 admin，但平台按成员关系把它降成 viewer。"""
+    from app.db.session import SessionLocal
+    from app.services.tenants import create_membership
+
+    with SessionLocal() as db:
+        create_membership(db, subject="oidc:user-1", role="viewer")
+        db.commit()
+
+    with _client(_token(private_pem, role="admin")) as client:
+        me = client.get("/api/v1/me").json()
+        denied = client.post("/api/v1/agents", json={"name": "nope"})
+
+    assert me["role"] == "viewer"
+    assert denied.status_code == 403

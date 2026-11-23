@@ -25,9 +25,19 @@ WRITE_TOOLS = "write:tools"
 WRITE_POLICY = "write:policy"
 WRITE_KEYS = "write:keys"
 WRITE_SKILLS = "write:skills"
+WRITE_MEMBERS = "write:members"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
-    {READ, WRITE_AGENTS, INVOKE_TOOLS, WRITE_TOOLS, WRITE_POLICY, WRITE_KEYS, WRITE_SKILLS}
+    {
+        READ,
+        WRITE_AGENTS,
+        INVOKE_TOOLS,
+        WRITE_TOOLS,
+        WRITE_POLICY,
+        WRITE_KEYS,
+        WRITE_SKILLS,
+        WRITE_MEMBERS,
+    }
 )
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {

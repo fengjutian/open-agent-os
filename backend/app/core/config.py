@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     oidc_default_role: str = "viewer"
     # 从哪个 claim 取租户；取不到时落到默认租户
     oidc_tenant_claim: str = "tenant"
+    # true 时要求 OIDC 用户必须已加入该租户（没有 membership 直接 403）
+    oidc_require_membership: bool = False
     oidc_algorithms: str = "RS256"
     oidc_jwks_cache_seconds: int = 300
     # 每个密钥每分钟允许的请求数；0 表示不限流。
