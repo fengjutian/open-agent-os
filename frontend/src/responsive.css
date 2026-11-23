@@ -42,6 +42,13 @@
   min-height:auto;
  }
 
+ /* 单栏时会话列表限高，否则会把聊天区整个推到折叠线下。
+    align-self:start 避免被拉伸；min-height:0 消除网格项的「自动最小尺寸」
+    —— 否则 min-height 会盖过 max-height（CSS 里 min 优先于 max）。 */
+ .sessions{max-height:32vh;min-height:0;overflow:auto;align-self:start}
+
+ .chat{height:auto;min-height:0;align-self:start}
+
  header{height:auto;padding:14px 16px;gap:12px;flex-wrap:wrap}
 
  .messages{max-height:60vh;padding:14px}
@@ -65,4 +72,6 @@
  .inline-form{flex-wrap:wrap}
 
  .inline-form .field{flex:1 1 100%}
+
+ .sessions{max-height:26vh}
 }

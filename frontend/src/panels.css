@@ -103,7 +103,16 @@
  word-break:break-all;
 }
 
-.role-badge{display:block;font-size:10px;color:#8290a5;margin-bottom:6px}
+.role-badge{
+ display:block;
+ font-size:10px;
+ color:#8290a5;
+ margin-bottom:6px;
+ /* 密钥名可能很长，不要撑破侧栏 */
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+}
 
 .message small{display:block;margin-top:6px}
 

@@ -3,3 +3,5 @@ pytest==9.0.3
 ruff==0.12.3
 # 仅测试用：在无 Redis 服务的环境里验证限流器
 fakeredis==2.40.0
+# 前端浏览器冒烟测试（frontend/e2e/smoke.py）；优先用系统 Edge/Chrome，无需下载 Chromium
+playwright==1.58.0
