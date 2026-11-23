@@ -211,8 +211,15 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 - `GET /agents/{agent_id}/tools`：该 Agent 视角下每个工具的可用性（`allowed` + `reason`）。
 - `GET /tool-invocations`：调用记录，可按 `run_id`、`tool_name` 过滤。
 - `GET /audit-logs`：审计事件，可按 `run_id`、`action` 过滤。
-  包含 `tool.register` / `tool.update` / `policy.create` / `tool.invoke` / `tool.execute.failed`。
+  包含 `tool.register` / `tool.update` / `policy.create` / `tool.invoke` /
+  `tool.execute.failed` / `skill.*` / `apikey.*` / `tenant.*` / `membership.*`。
   审计只记录参数**键名**，不记录参数值。
+- `GET /audit-logs/verify`：校验当前租户的审计哈希链，返回
+  `{ valid, checked, legacy, broken_at, reason }`。
+
+审计日志是只追加的：没有更新/删除接口，ORM 层也会拒绝 UPDATE/DELETE。
+`legacy` 是引入哈希链之前写入的行数（未链接，不影响结论）。
+注意：删除尾部记录无法被检测（剩余链仍自洽），详见 security.md。
 
 ### Agent Loop 中的工具调用
 

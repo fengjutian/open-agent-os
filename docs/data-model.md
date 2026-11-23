@@ -16,7 +16,8 @@
 启动命令留在环境变量里。
 - PolicyRule：id、agent_id（可空=全局）、tool_name（或 `*`）、effect（allow/deny）、priority、enabled、note、created_at。
 - ToolInvocation：id、run_id、agent_id、conversation_id、tool_name、arguments、result、status、error_code、error_message、started_at、finished_at。
-- AuditLog：id、run_id、request_id、actor、action、resource、decision、reason、detail、created_at。
+- AuditLog：id、run_id、request_id、actor、action、resource、decision、reason、detail、created_at，
+  外加 `seq` / `prev_hash` / `entry_hash` 构成按租户的哈希链（只追加，ORM 拒绝改动）。
 
 关键取舍：**ToolInvocation 与 AuditLog 不设外键**，避免随 Agent 删除而级联消失——
 审计记录应当比业务数据活得久。`agent_id` 仅作为普通带索引列保存。

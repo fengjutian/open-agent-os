@@ -239,6 +239,19 @@ class AuditLogRead(BaseModel):
     created_at: UtcDatetime
 
 
+class AuditVerifyResult(BaseModel):
+    """哈希链校验结果。"""
+
+    valid: bool
+    # 已校验的链接行数
+    checked: int
+    # 引入哈希链之前写入的历史行（未链接，不影响结论）
+    legacy: int = 0
+    # 首个断裂点的 seq（如果有）
+    broken_at: int | None = None
+    reason: str | None = None
+
+
 class AgentToolRead(BaseModel):
     """某个 Agent 视角下的工具可用性（注册状态 + 策略裁决）。"""
 

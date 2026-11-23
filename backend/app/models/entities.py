@@ -257,11 +257,19 @@ class ToolInvocation(TenantScoped):
 
 
 class AuditLog(TenantScoped):
-    """审计事件。同样不挂外键，保证记录不可被级联删除。"""
+    """审计事件。同样不挂外键，保证记录不可被级联删除。
+
+    只追加：`seq` / `prev_hash` / `entry_hash` 构成按租户的哈希链，
+    任何改写、删除或插入都会在 `verify_chain` 时暴露。
+    """
 
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    # 租户内单调递增序号；历史行可能为 NULL（引入哈希链之前写入的）
+    seq: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     run_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     request_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
     actor: Mapped[str] = mapped_column(String(80), nullable=False)

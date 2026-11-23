@@ -503,6 +503,44 @@ http.server
 span 树、父子关系、属性与指标（`tests/test_telemetry.py`）。
 真实导出（Collector / Jaeger）需要你启动一个 OTLP 后端——本机 Docker 未启动，未实测。
 
+## 审计防篡改
+
+审计日志是**只追加**的，并且每条记录都链进按租户的哈希链：
+
+```text
+entry_hash = sha256(prev_hash + canonical(entry))
+canonical   = 固定字段 + 固定顺序的 JSON
+```
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" localhost:8000/api/v1/audit-logs/verify
+# => {"valid":true,"checked":12,"legacy":0,"broken_at":null,"reason":null}
+```
+
+被改动时会指出首个断裂点：
+
+```json
+{"valid":false,"checked":1,"broken_at":2,"reason":"entry_hash 不匹配（内容被修改）"}
+```
+
+能被发现的改动：
+
+| 行为 | 检测方式 |
+|---|---|
+| 改某条记录的内容 | `entry_hash` 不匹配 |
+| 删除中间某条 | `seq` 不连续 + `prev_hash` 断链 |
+| 插入伪造记录 | `seq` 不连续 |
+| 通过 ORM 更新/删除 | 直接抛出 `RuntimeError`（只追加保护） |
+
+### 边界：这是「防篡改」不是「防重写」
+
+- **删除尾部记录检测不到**——剩下的链本身仍然自洽（`checked` 会变小，但 `valid` 仍为 true）。
+- 拥有数据库完整写权限的人可以重算整条链，让它重新自洽。
+
+真正的防篡改需要**外部锚定**：定期把链头（最新 `entry_hash`）写入不可变介质
+（WORM 存储、对象锁、外部透明日志），或者把链头随日志导出到独立系统。
+当前实现只能保证"局部改动一定会被发现"。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL
@@ -558,6 +596,7 @@ REDIS_URL=redis://localhost:6379/0
 - OIDC / JWT 认证（与 API Key 并存，JWKS 验签）
 - 多租户隔离（数据层强制过滤，跨租户 404）
 - 组织与成员（租户生命周期、成员关系覆盖 IdP 角色）
+- 审计哈希链（只追加 + 篡改可检出）
 - OpenTelemetry 链路 / 指标 / 日志关联（默认关闭，可接 OTLP）
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额（可切换 Redis 后端）

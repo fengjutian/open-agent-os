@@ -27,6 +27,7 @@ from app.models.entities import Agent, AuditLog, Conversation, PolicyRule, ToolD
 from app.schemas.dto import (
     AgentToolRead,
     AuditLogRead,
+    AuditVerifyResult,
     ErrorEnvelope,
     McpSyncResult,
     Page,
@@ -40,6 +41,7 @@ from app.schemas.dto import (
     ToolUpdate,
 )
 from app.services.audit import AuditService
+from app.services.audit_chain import verify_chain
 from app.services.mcp_client import McpError, McpStdioClient
 from app.services.policy import PolicyEngine
 from app.services.tool_gateway import ToolGateway
@@ -360,6 +362,22 @@ def list_tool_invocations(
         .offset(offset)
     ).all()
     return Page[ToolInvocationRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/audit-logs/verify", response_model=AuditVerifyResult)
+def verify_audit_logs(
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
+    """校验当前租户的审计哈希链，指出首个断裂点。"""
+    report = verify_chain(db)
+    return AuditVerifyResult(
+        valid=report.valid,
+        checked=report.checked,
+        legacy=report.legacy,
+        broken_at=report.broken_at,
+        reason=report.reason,
+    )
 
 
 @router.get("/audit-logs", response_model=Page[AuditLogRead])
