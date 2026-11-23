@@ -30,7 +30,7 @@
 - ⏳ PostgreSQL、Redis（已支持：PG 语法与迁移、Redis 限流后端）
 - Temporal
 - 审计、限流、配额、成本管理（限流与配额已落地）
-- OpenTelemetry
+- OpenTelemetry（已落地：链路、3 个指标、日志 trace 关联；默认关闭）
 
 ## V1.0 Platform
 - Agent Studio、React Flow Workflow Editor

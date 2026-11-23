@@ -13,6 +13,7 @@ from app.api.skill_routes import router as skill_router
 from app.api.tool_routes import router as tool_router
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.core.telemetry import init_telemetry, shutdown_telemetry
 from app.db.migrate import run_migrations
 from app.db.session import SessionLocal
 from app.models import entities  # noqa: F401  注册 SQLAlchemy 模型
@@ -52,10 +53,13 @@ def bootstrap_admin_key() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging(settings.log_level)
+    # 默认关闭；配置 OTEL_ENABLED 后才会真正建立 provider
+    init_telemetry()
     # 原先是 Base.metadata.create_all；现在 schema 由 Alembic 迁移唯一负责。
     run_migrations()
     bootstrap_admin_key()
     yield
+    shutdown_telemetry()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

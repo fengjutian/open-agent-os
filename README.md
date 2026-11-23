@@ -412,6 +412,55 @@ curl -X POST localhost:8000/api/v1/api-keys -H "Authorization: Bearer $API_KEY" 
   跨租户重名会返回 409。
 - 没有组织/成员/计费概念，也没有跨租户的管理员视图。
 
+## 可观测性（OpenTelemetry）
+
+默认关闭，埋点代码始终存在——没有 provider 时 OTel API 就是 no-op，成本接近于零。
+需要时配三项即可：
+
+```bash
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=agent-platform
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # Collector / Jaeger 的 OTLP/HTTP
+OTEL_SAMPLE_RATIO=1.0                                # 0..1，生产建议调低
+```
+
+### 链路
+
+```text
+http.server
+└─ agent.run            (tenant.id, agent.id, run.id, model, run.status)
+   ├─ model.request     (iteration, reply.text_chars, reply.tool_calls)
+   ├─ tool.call         (tool.name, tool.status, tool.allowed)
+   │  └─ mcp.call       (mcp.server, mcp.tool, mcp.is_error)
+   └─ model.request
+```
+
+`run_id` / `request_id` 都在 span 属性里，能和持久化的 `Run` / `RunEvent` 对上。
+流式与非流式走同一套埋点（`agent.stream=true` 区分）。
+
+### 指标
+
+只有三个，刻意保持低基数（**不把工具名放进指标属性**，否则会随租户增长）：
+
+- `agent.runs`（按 `status`）
+- `agent.run.duration_ms`（按 `status`）
+- `tool.invocations`（按 `status`）
+
+### 日志关联
+
+有活动 span 时，JSON 日志里会自动带上 `trace_id` / `span_id`，可以直接从日志跳到链路：
+
+```json
+{"level":"INFO","logger":"app.services.agent_runtime","message":"agent run started",
+ "request_id":"req_...","run_id":"run_...","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+```
+
+### 本地验证
+
+不需要部署 Jaeger：测试用 `InMemorySpanExporter` / `InMemoryMetricReader` 断言整棵
+span 树、父子关系、属性与指标（`tests/test_telemetry.py`）。
+真实导出（Collector / Jaeger）需要你启动一个 OTLP 后端——本机 Docker 未启动，未实测。
+
 ## 数据库与限流后端
 
 ### SQLite → PostgreSQL
@@ -466,6 +515,7 @@ REDIS_URL=redis://localhost:6379/0
 - API Key 认证 + admin/developer/viewer 三角色 RBAC
 - OIDC / JWT 认证（与 API Key 并存，JWKS 验签）
 - 多租户隔离（数据层强制过滤，跨租户 404）
+- OpenTelemetry 链路 / 指标 / 日志关联（默认关闭，可接 OTLP）
 - Run / RunEvent 持久化与事件流查询
 - 每密钥限流与每日运行配额（可切换 Redis 后端）
 - PostgreSQL / SQLite 双支持（同一套迁移）

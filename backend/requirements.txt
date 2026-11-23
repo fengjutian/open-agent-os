@@ -11,3 +11,7 @@ psycopg[binary]==3.3.9
 redis==6.4.0
 # OIDC / JWT 验签（RS256 需要 cryptography）
 PyJWT[crypto]==2.13.0
+# OpenTelemetry（默认关闭；OTEL_ENABLED=true 时启用）
+opentelemetry-api==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-exporter-otlp-proto-http==1.42.1

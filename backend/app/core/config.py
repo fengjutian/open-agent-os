@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     mcp_timeout_seconds: float = 30.0
     # 注入 system prompt 的技能内容字符上限，超出则截断。
     skill_max_chars: int = 8000
+    # ---- OpenTelemetry ----
+    # 默认关闭：埋点始终存在，但没有 provider 时是 no-op，成本接近于零。
+    otel_enabled: bool = False
+    otel_service_name: str = "agent-platform"
+    environment: str = "local"
+    # 形如 http://localhost:4318；配置后走 OTLP/HTTP 导出
+    otel_exporter_otlp_endpoint: str = ""
+    # 采样比例 0..1，1 表示全量
+    otel_sample_ratio: float = 1.0
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

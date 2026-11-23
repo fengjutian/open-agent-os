@@ -21,6 +21,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, ErrorCode
+from app.core.telemetry import record_tool, span
+from app.core.tenancy import current_tenant
 from app.models.entities import ToolInvocation, now_utc
 from app.services.audit import AuditService, agent_actor
 from app.services.policy import PolicyEngine
@@ -51,6 +53,31 @@ class ToolGateway:
         self._db = db
 
     async def invoke(
+        self,
+        *,
+        run_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        agent_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> ToolCallOutcome:
+        """受控调用的入口：套一层 span 与指标，主体逻辑在 _invoke。"""
+        with span(
+            "tool.call", **{"tool.name": tool_name, "tenant.id": current_tenant()}
+        ) as current:
+            outcome = await self._invoke(
+                run_id=run_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+            )
+            current.set_attribute("tool.status", outcome.status)
+            current.set_attribute("tool.allowed", outcome.allowed)
+            record_tool(status=outcome.status)
+            return outcome
+
+    async def _invoke(
         self,
         *,
         run_id: str,

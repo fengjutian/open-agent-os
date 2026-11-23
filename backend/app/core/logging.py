@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.request_context import request_id_var, run_id_var
+from app.core.telemetry import current_trace_ids
 
 
 class JsonFormatter(logging.Formatter):
@@ -30,6 +31,13 @@ class JsonFormatter(logging.Formatter):
         run_id = run_id_var.get()
         if run_id:
             payload["run_id"] = run_id
+
+        # 与 OpenTelemetry 对齐：有活动 span 时把 trace_id/span_id 一起写进日志，
+        # 这样日志和链路能互相跳转。
+        trace_id, span_id = current_trace_ids()
+        if trace_id:
+            payload["trace_id"] = trace_id
+            payload["span_id"] = span_id
 
         # 业务代码通过 extra={"fields": {...}} 附加上下文字段。
         fields = getattr(record, "fields", None)

@@ -22,6 +22,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.telemetry import span
 from app.models.entities import ToolDefinition, now_utc
 from app.services.mcp_client import McpError, McpStdioClient
 
@@ -117,36 +118,38 @@ async def _execute_mcp(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[
         timeout=timeout + 5.0,
     )
 
-    try:
-        await asyncio.wait_for(client.start(), timeout=timeout)
-        result = await asyncio.wait_for(client.call_tool(remote_tool, arguments), timeout=timeout)
-    except TimeoutError as exc:
-        raise AppError(
-            ErrorCode.TOOL_TIMEOUT,
-            f"MCP 调用超时（{timeout}s）",
-            status_code=504,
-        ) from exc
-    except McpError as exc:
-        logger.warning(
-            "mcp call failed",
-            extra={"fields": {"tool": tool.name, "server": server_name, "error": exc.message}},
-        )
-        raise AppError(
-            ErrorCode.MCP_ERROR,
-            f"MCP 调用失败：{exc.message}",
-            status_code=502,
-        ) from exc
-    finally:
-        # 被取消时也必须把子进程收掉，否则会泄漏。
-        with contextlib.suppress(Exception):
-            await asyncio.shield(client.close())
+    with span("mcp.call", **{"mcp.server": server_name, "mcp.tool": remote_tool}) as current:
+        try:
+            await asyncio.wait_for(client.start(), timeout=timeout)
+            result = await asyncio.wait_for(client.call_tool(remote_tool, arguments), timeout=timeout)
+        except TimeoutError as exc:
+            raise AppError(
+                ErrorCode.TOOL_TIMEOUT,
+                f"MCP 调用超时（{timeout}s）",
+                status_code=504,
+            ) from exc
+        except McpError as exc:
+            logger.warning(
+                "mcp call failed",
+                extra={"fields": {"tool": tool.name, "server": server_name, "error": exc.message}},
+            )
+            raise AppError(
+                ErrorCode.MCP_ERROR,
+                f"MCP 调用失败：{exc.message}",
+                status_code=502,
+            ) from exc
+        finally:
+            # 被取消时也必须把子进程收掉，否则会泄漏。
+            with contextlib.suppress(Exception):
+                await asyncio.shield(client.close())
 
-    if result.is_error:
-        detail = result.text()[:200]
-        raise AppError(
-            ErrorCode.TOOL_EXECUTION_FAILED,
-            f"MCP 工具返回错误：{detail}",
-            status_code=502,
-        )
+        current.set_attribute("mcp.is_error", result.is_error)
+        if result.is_error:
+            detail = result.text()[:200]
+            raise AppError(
+                ErrorCode.TOOL_EXECUTION_FAILED,
+                f"MCP 工具返回错误：{detail}",
+                status_code=502,
+            )
 
-    return {"content": result.content, "text": result.text()}
+        return {"content": result.content, "text": result.text()}

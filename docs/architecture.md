@@ -26,6 +26,9 @@ Rust Executor
   └─ Resource Limits
 
 基础设施：PostgreSQL / Redis / Temporal / Qdrant / MinIO / OpenTelemetry
+
+> 其中 **OpenTelemetry 已落地**（链路 + 指标 + 日志 trace 关联，默认关闭），
+> PostgreSQL 与 Redis 已支持（Redis 限流后端），Temporal / Qdrant / MinIO 仍未接入。
 ```
 
 ## 语言职责

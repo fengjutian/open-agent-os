@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,6 +14,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import log_event
 from app.core.request_context import principal_key_id_var, run_id_var
+from app.core.telemetry import record_run, span
+from app.core.tenancy import current_tenant
 from app.models.entities import Agent, Conversation, Message, Run, now_utc
 from app.schemas.dto import MessageRead
 from app.services.context import ChatMessage, ContextResult, build_messages
@@ -76,7 +79,32 @@ class AgentRuntime:
         conversation: Conversation,
         user_content: str,
     ) -> tuple[Message, Message]:
+        """非流式入口：在外面套一层 span 与指标，主体逻辑在 _respond。"""
+        started = time.perf_counter()
+        outcome = "failed"
+        with span("agent.run") as current:
+            current.set_attribute("tenant.id", current_tenant())
+            try:
+                result = await self._respond(db, conversation, user_content, current)
+                outcome = "succeeded"
+                return result
+            finally:
+                current.set_attribute("run.status", outcome)
+                record_run(
+                    status=outcome, duration_ms=(time.perf_counter() - started) * 1000
+                )
+
+    async def _respond(
+        self,
+        db: Session,
+        conversation: Conversation,
+        user_content: str,
+        current,
+    ) -> tuple[Message, Message]:
         state = self._start(db, conversation, user_content)
+        current.set_attribute("agent.id", state.agent.id)
+        current.set_attribute("run.id", state.run_id)
+        current.set_attribute("model", state.agent.model)
         try:
             provider = self._provider or get_model_provider()
             answer = ""
@@ -91,11 +119,16 @@ class AgentRuntime:
                     message_count=len(state.messages),
                     tools=state.tool_names,
                 )
-                reply = await provider.generate(
-                    model=state.agent.model,
-                    messages=state.messages,
-                    tools=state.tool_specs or None,
-                )
+                with span(
+                    "model.request", iteration=iteration, model=state.agent.model
+                ) as model_span:
+                    reply = await provider.generate(
+                        model=state.agent.model,
+                        messages=state.messages,
+                        tools=state.tool_specs or None,
+                    )
+                    model_span.set_attribute("reply.text_chars", len(reply.text))
+                    model_span.set_attribute("reply.tool_calls", len(reply.tool_calls))
                 state.recorder.event(
                     "model.response",
                     iteration=iteration,
@@ -146,12 +179,38 @@ class AgentRuntime:
         conversation: Conversation,
         user_content: str,
     ) -> AsyncIterator[dict[str, Any]]:
+        """流式入口：套一层 span 与指标，主体逻辑在 _respond_stream。"""
+        started = time.perf_counter()
+        outcome = "failed"
+        with span("agent.run", **{"agent.stream": True}) as current:
+            current.set_attribute("tenant.id", current_tenant())
+            try:
+                async for event in self._respond_stream(db, conversation, user_content, current):
+                    if event.get("type") == "completed":
+                        outcome = "succeeded"
+                    yield event
+            finally:
+                current.set_attribute("run.status", outcome)
+                record_run(
+                    status=outcome, duration_ms=(time.perf_counter() - started) * 1000
+                )
+
+    async def _respond_stream(
+        self,
+        db: Session,
+        conversation: Conversation,
+        user_content: str,
+        current,
+    ) -> AsyncIterator[dict[str, Any]]:
         """逐事件产出，最后落库。
 
         事件：run.started / delta / tool.call / tool.result / completed / error。
         与非流式共用 _start/_finish，保证两条路径的行为不会分叉。
         """
         state = self._start(db, conversation, user_content)
+        current.set_attribute("agent.id", state.agent.id)
+        current.set_attribute("run.id", state.run_id)
+        current.set_attribute("model", state.agent.model)
         try:
             yield {"type": "run.started", "run_id": state.run_id}
 
@@ -172,16 +231,23 @@ class AgentRuntime:
 
                 streamed: list[str] = []
                 reply = ModelReply()
-                async for event in provider.stream(
+                with span(
+                    "model.request",
+                    iteration=iteration,
                     model=state.agent.model,
-                    messages=state.messages,
-                    tools=state.tool_specs or None,
-                ):
-                    if isinstance(event, TextDelta):
-                        streamed.append(event.text)
-                        yield {"type": "delta", "text": event.text}
-                    elif isinstance(event, StreamDone):
-                        reply = event.reply
+                    streaming=True,
+                ) as model_span:
+                    async for event in provider.stream(
+                        model=state.agent.model,
+                        messages=state.messages,
+                        tools=state.tool_specs or None,
+                    ):
+                        if isinstance(event, TextDelta):
+                            streamed.append(event.text)
+                            yield {"type": "delta", "text": event.text}
+                        elif isinstance(event, StreamDone):
+                            reply = event.reply
+                    model_span.set_attribute("reply.tool_calls", len(reply.tool_calls))
 
                 state.recorder.event(
                     "model.response",

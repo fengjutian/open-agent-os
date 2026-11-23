@@ -35,11 +35,18 @@ from uuid import uuid4  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader  # noqa: E402
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
 
+from app.core.config import settings  # noqa: E402
+from app.core.telemetry import init_telemetry  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.api_keys import ApiKeyService  # noqa: E402
 from app.services.rate_limit import reset_rate_limiter  # noqa: E402
+
+SPAN_EXPORTER = InMemorySpanExporter()
+METRIC_READER = InMemoryMetricReader()
 
 
 @pytest.fixture(scope="session")
@@ -47,6 +54,31 @@ def client() -> TestClient:
     # with 语句会触发 lifespan：配置日志并执行 Alembic 迁移。
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session", autouse=True)
+def telemetry(client):
+    """整个测试进程只初始化一次 provider，导出到内存，便于断言 span 树。"""
+    settings.otel_enabled = True
+    init_telemetry(span_exporter=SPAN_EXPORTER, metric_reader=METRIC_READER, force=True)
+    yield
+
+
+@pytest.fixture(scope="session")
+def span_exporter() -> InMemorySpanExporter:
+    return SPAN_EXPORTER
+
+
+@pytest.fixture(scope="session")
+def metric_reader() -> InMemoryMetricReader:
+    return METRIC_READER
+
+
+@pytest.fixture(autouse=True)
+def clear_spans(telemetry):
+    """每个用例前清空 span，避免互相干扰。"""
+    SPAN_EXPORTER.clear()
+    yield
 
 
 @pytest.fixture(autouse=True)
