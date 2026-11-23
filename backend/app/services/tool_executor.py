@@ -15,7 +15,6 @@ MCP 是「借壳执行」的高风险点：拥有 write:tools 的管理员只能
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -24,7 +23,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.telemetry import span
 from app.models.entities import ToolDefinition, now_utc
-from app.services.mcp_client import McpError, McpStdioClient
+from app.services.mcp_client import McpError
+from app.services.mcp_pool import get_mcp_pool
 
 logger = logging.getLogger(__name__)
 
@@ -109,20 +109,17 @@ async def _execute_mcp(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[
         )
 
     timeout = min(tool.timeout_seconds or settings.mcp_timeout_seconds, settings.mcp_timeout_seconds)
-    client = McpStdioClient(
-        command=server.command,
-        args=server.args,
-        env=server.env,
-        # 客户端读超时作为兜底，故意比整体预算宽松：让外层 wait_for 先触发，
-        # 这样超时语义稳定映射成 TOOL_TIMEOUT，而不是随机的 MCP 读超时。
-        timeout=timeout + 5.0,
-    )
+    pool = get_mcp_pool()
 
     with span("mcp.call", **{"mcp.server": server_name, "mcp.tool": remote_tool}) as current:
         try:
-            await asyncio.wait_for(client.start(), timeout=timeout)
-            result = await asyncio.wait_for(client.call_tool(remote_tool, arguments), timeout=timeout)
+            async with pool.session(server_name, server, timeout=timeout) as client:
+                result = await asyncio.wait_for(
+                    client.call_tool(remote_tool, arguments), timeout=timeout
+                )
         except TimeoutError as exc:
+            # 响应可能还在路上，连接不能复用
+            await pool.reset(server_name)
             raise AppError(
                 ErrorCode.TOOL_TIMEOUT,
                 f"MCP 调用超时（{timeout}s）",
@@ -138,10 +135,6 @@ async def _execute_mcp(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[
                 f"MCP 调用失败：{exc.message}",
                 status_code=502,
             ) from exc
-        finally:
-            # 被取消时也必须把子进程收掉，否则会泄漏。
-            with contextlib.suppress(Exception):
-                await asyncio.shield(client.close())
 
         current.set_attribute("mcp.is_error", result.is_error)
         if result.is_error:

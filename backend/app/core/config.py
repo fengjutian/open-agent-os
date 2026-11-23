@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     # 单次 MCP 调用允许的最长等待（秒），与工具自身的 timeout 取较小值。
     mcp_timeout_seconds: float = 30.0
+    # MCP 连接空闲多久后回收（秒）；0 表示每次调用都重连
+    mcp_idle_seconds: float = 60.0
     # 注入 system prompt 的技能内容字符上限，超出则截断。
     skill_max_chars: int = 8000
     # ---- OpenTelemetry ----
