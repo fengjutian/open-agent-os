@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useState} from "react";
-import {ApiError,api,keyStore,sendMessageStream} from "./api";
+import {ApiError,api,keyStore,resumeRunStream,sendMessageStream} from "./api";
 import {RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
 import type {Agent,Conversation,Me,Message} from "./types";
 
@@ -90,24 +90,51 @@ export default function App(){
  async function send(){
   if(!conversation||!input.trim()||busy) return;
   const text=input.trim();
+  const conversationId=conversation.id;
   setInput("");
   setBusy(true);
   setError("");
   setPendingText(text);
   setStreamText("");
   setStreamTools([]);
+
+  let runId="";
+  let settled=false;
+  const applyCompleted=(payload:{user_message:Message;assistant_message:Message})=>{
+   settled=true;
+   setMessages(old=>[...old,payload.user_message,payload.assistant_message]);
+  };
+
   try{
-   await sendMessageStream(conversation.id,text,{
+   await sendMessageStream(conversationId,text,{
+    onStarted:id=>{runId=id;},
     onDelta:chunk=>setStreamText(old=>old+chunk),
     onToolCall:tool=>setStreamTools(old=>[...old,tool]),
     onToolResult:(tool,status)=>setStreamTools(old=>[...old,`${tool}:${status}`]),
-    onCompleted:payload=>setMessages(old=>[...old,payload.user_message,payload.assistant_message]),
+    onCompleted:applyCompleted,
     onError:(code,message)=>{
+     settled=true;
      setError(`${code}: ${message}`);
      setInput(text);
     },
    });
   }catch(err){
+   // 网络中断：服务端会把这次运行跑完，用回放接口把最终结果取回来。
+   if(runId&&!settled&&!(err instanceof ApiError)){
+    setError("连接中断，正在恢复本次运行的结果…");
+    try{
+     await resumeRunStream(runId,{
+      onCompleted:applyCompleted,
+      onEnd:(status,reason)=>{
+       if(status==="succeeded") setError("");
+       else setError(`本次运行未完成：${status}${reason?`（${reason}）`:""}`);
+      },
+     });
+     return;
+    }catch(resumeErr){
+     handleError(resumeErr);
+    }
+   }
    handleError(err);
    setInput(text);
   }finally{

@@ -68,7 +68,10 @@ def test_stream_run_is_persisted(client, conversation):
 
     types = [e["type"] for e in client.get(f"/api/v1/runs/{run_id}/events").json()["items"]]
     assert types[0] == "run.started"
-    assert types[-1] == "run.completed"
+    # run.completed 是运行生命周期记录（计数），completed 是带最终消息的交付事件，
+    # 后者最后落库，供断线重连时重建结果。
+    assert "run.completed" in types
+    assert types[-1] == "completed"
     assert "model.request" in types
 
 

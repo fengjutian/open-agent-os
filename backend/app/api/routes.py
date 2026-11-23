@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from uuid import uuid4
 
@@ -14,7 +15,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.request_context import principal_key_id_var, request_id_var, run_id_var
 from app.core.security import READ, WRITE_AGENTS, Principal
 from app.db.session import SessionLocal, get_db
-from app.models.entities import Agent, Conversation, Message
+from app.models.entities import Agent, Conversation, Message, RunEvent
 from app.schemas.dto import (
     AgentCreate,
     AgentRead,
@@ -29,6 +30,7 @@ from app.schemas.dto import (
 )
 from app.services.agent_runtime import AgentRuntime
 from app.services.rate_limit import enforce_run_quota
+from app.services.run_stream import get_run_hub
 from app.services.skills import assert_skills_exist
 
 logger = logging.getLogger(__name__)
@@ -257,38 +259,65 @@ async def stream_message(
 
     鉴权、配额、会话存在性在**建立流之前**校验，这样失败仍然是正常的 HTTP 错误码；
     一旦开始推送，就只能用 `error` 事件告知客户端。
+
+    运行本身跑在独立任务里：客户端断开只退订，运行会继续跑完并落库，
+    之后可以用 `/runs/{id}/events/stream` 回放结果。
     """
     get_or_404(db, Conversation, conversation_id, "Conversation")
     enforce_run_quota(db, principal.key_id)
 
     run_id = f"run_{uuid4().hex}"
     request_id = request_id_var.get()
+    hub = get_run_hub()
+    channel = hub.create(run_id)
 
-    async def event_stream():
+    async def run_and_publish() -> None:
         run_token = run_id_var.set(run_id)
         principal_token = principal_key_id_var.set(principal.key_id)
-        # 流式响应会超出请求依赖的生命周期，这里独立持有 session。
         session = SessionLocal()
         try:
             conversation = session.get(Conversation, conversation_id)
             if conversation is None:
-                yield sse_event(
+                channel.publish(
                     {"type": "error", "code": ErrorCode.NOT_FOUND, "message": "Conversation not found"}
                 )
                 return
 
             async for event in AgentRuntime().respond_stream(session, conversation, payload.content):
-                yield sse_event(event)
+                if event.get("type") == "completed":
+                    _persist_completed_event(session, run_id, event)
+                channel.publish(event)
+                # 增量文本不落库；其余事件逐条提交，重连方才能看到进展
+                if event.get("type") != "delta":
+                    session.commit()
         except Exception:
-            logger.exception("stream endpoint failed", extra={"fields": {"run_id": run_id}})
+            logger.exception("stream run failed", extra={"fields": {"run_id": run_id}})
             session.rollback()
-            yield sse_event(
+            channel.publish(
                 {"type": "error", "code": ErrorCode.INTERNAL_ERROR, "message": "服务器内部错误"}
             )
         finally:
             session.close()
+            channel.close()
+            hub.discard(run_id)
             principal_key_id_var.reset(principal_token)
             run_id_var.reset(run_token)
+
+    # 必须先订阅再启动任务：Mock provider 可能在 StreamingResponse 开始迭代前
+    # 就跑完，届时事件会被发进「还不存在的订阅者」而丢失。队列本身是缓冲。
+    queue = channel.subscribe()
+    channel.task = asyncio.create_task(run_and_publish())
+
+    async def event_stream():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield sse_event(event)
+        finally:
+            # 客户端断开只会退订，不会取消运行任务
+            channel.unsubscribe(queue)
 
     return StreamingResponse(
         event_stream(),
@@ -301,3 +330,14 @@ async def stream_message(
             "X-Request-ID": request_id,
         },
     )
+
+
+def _persist_completed_event(session: Session, run_id: str, event: dict) -> None:
+    """把「完成」事件落库，重连方靠它拿到最终消息。"""
+    # 必须先 flush：session 是 autoflush=False 的，否则 max(seq) 看不到
+    # 本次运行刚追加、还没写盘的事件，新事件会复用同一个 seq。
+    session.flush()
+    next_seq = (
+        session.scalar(select(func.max(RunEvent.seq)).where(RunEvent.run_id == run_id)) or 0
+    ) + 1
+    session.add(RunEvent(run_id=run_id, seq=next_seq, type="completed", payload=event))

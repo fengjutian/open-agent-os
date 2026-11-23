@@ -90,10 +90,12 @@ export const api={
 
 /** 流式回调：服务端按 SSE 事件推送。 */
 export interface StreamHandlers {
+ onStarted?(runId:string):void;
  onDelta?(text:string):void;
  onToolCall?(tool:string):void;
  onToolResult?(tool:string,status:string):void;
  onCompleted?(payload:{run_id:string;user_message:Message;assistant_message:Message}):void;
+ onEnd?(status:string,reason?:string):void;
  onError?(code:string,message:string):void;
 }
 
@@ -109,11 +111,31 @@ function handleSseChunk(chunk:string,handlers:StreamHandlers){
  let payload:Record<string,unknown>;
  try{payload=JSON.parse(data) as Record<string,unknown>;}catch{return;}
 
- if(event==="delta") handlers.onDelta?.(String(payload.text ?? ""));
+ if(event==="run.started") handlers.onStarted?.(String(payload.run_id ?? ""));
+ else if(event==="delta") handlers.onDelta?.(String(payload.text ?? ""));
  else if(event==="tool.call") handlers.onToolCall?.(String(payload.tool ?? ""));
  else if(event==="tool.result") handlers.onToolResult?.(String(payload.tool ?? ""),String(payload.status ?? ""));
  else if(event==="completed") handlers.onCompleted?.(payload as never);
+ else if(event==="stream.end") handlers.onEnd?.(String(payload.status ?? ""),payload.reason ? String(payload.reason) : undefined);
  else if(event==="error") handlers.onError?.(String(payload.code ?? "error"),String(payload.message ?? ""));
+}
+
+async function consumeSse(body:ReadableStream<Uint8Array>,handlers:StreamHandlers):Promise<void>{
+ const reader = body.getReader();
+ const decoder = new TextDecoder();
+ let buffer = "";
+ while(true){
+  const {done,value} = await reader.read();
+  if(done) break;
+  buffer += decoder.decode(value,{stream:true});
+  let boundary = buffer.indexOf("\n\n");
+  while(boundary >= 0){
+   handleSseChunk(buffer.slice(0,boundary),handlers);
+   buffer = buffer.slice(boundary+2);
+   boundary = buffer.indexOf("\n\n");
+  }
+ }
+ if(buffer.trim()) handleSseChunk(buffer,handlers);
 }
 
 /**
@@ -130,20 +152,19 @@ export async function sendMessageStream(conversationId:string,content:string,han
  });
  if(!res.ok) throw new ApiError(await describeError(res), res.status);
  if(!res.body) throw new ApiError("当前环境不支持流式响应",0);
+ await consumeSse(res.body,handlers);
+}
 
- const reader = res.body.getReader();
- const decoder = new TextDecoder();
- let buffer = "";
- while(true){
-  const {done,value} = await reader.read();
-  if(done) break;
-  buffer += decoder.decode(value,{stream:true});
-  let boundary = buffer.indexOf("\n\n");
-  while(boundary >= 0){
-   handleSseChunk(buffer.slice(0,boundary),handlers);
-   buffer = buffer.slice(boundary+2);
-   boundary = buffer.indexOf("\n\n");
-  }
- }
- if(buffer.trim()) handleSseChunk(buffer,handlers);
+/**
+ * 断线续传：按游标回放某次运行的事件。
+ * 服务端会一直跟随到运行结束（或超时），因此这里可能等待较久。
+ */
+export async function resumeRunStream(runId:string,handlers:StreamHandlers,after=0):Promise<void>{
+ const key = keyStore.get();
+ const res = await fetch(`${BASE}/runs/${runId}/events/stream?after=${after}`,{
+  headers:{...(key ? {Authorization:`Bearer ${key}`} : {})},
+ });
+ if(!res.ok) throw new ApiError(await describeError(res), res.status);
+ if(!res.body) throw new ApiError("当前环境不支持流式响应",0);
+ await consumeSse(res.body,handlers);
 }

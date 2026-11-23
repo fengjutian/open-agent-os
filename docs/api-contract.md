@@ -255,6 +255,21 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 鉴权、配额与会话存在性在**建立流之前**校验，因此那几类失败仍是 401/403/404/429；
 一旦开始推送，后续错误只能以 `error` 事件表达（HTTP 状态已是 200）。
 
+运行本身在独立任务里执行：客户端断开只退订，运行继续跑完并落库。
+
+### 断线续传
+
+`GET /runs/{run_id}/events/stream?after=<seq>`，`text/event-stream`。
+
+- 游标来自 `after` 查询参数或标准 `Last-Event-ID` 头（`after` 优先，取较大语义上的后者）。
+- 每条事件带 `id: <seq>`；回放从 `seq > after` 开始。
+- 运行仍为 `running` 时持续跟随（轮询间隔 `RUN_STREAM_POLL_SECONDS`），
+  直到终态或超过 `RUN_STREAM_MAX_SECONDS`，最后发一条 `stream.end`：
+  `{ run_id, status, reason? }`（`reason=timeout` 表示跟随超时）。
+- 事件类型里 `run.completed` 是运行生命周期记录（含计数），
+  `completed` 是带最终消息的交付事件，重连方用它重建结果。
+- **增量文本不落库**：重连能拿到生命周期事件与最终消息，但拿不回已流出的那段文字。
+
 ### MCP 工具
 
 - `POST /mcp/servers/{server_name}/sync`：连接已声明的 MCP 服务器，把其工具同步进

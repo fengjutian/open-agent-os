@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     mcp_timeout_seconds: float = 30.0
     # MCP 连接空闲多久后回收（秒）；0 表示每次调用都重连
     mcp_idle_seconds: float = 60.0
+    # 回放已落库事件时的轮询间隔（秒）
+    run_stream_poll_seconds: float = 0.2
+    # 回放端点最长跟随多久（秒）；超时后以 stream.end(reason=timeout) 收尾
+    run_stream_max_seconds: float = 120.0
     # 注入 system prompt 的技能内容字符上限，超出则截断。
     skill_max_chars: int = 8000
     # ---- OpenTelemetry ----

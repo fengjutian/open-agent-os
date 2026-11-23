@@ -20,6 +20,7 @@ from app.db.session import SessionLocal
 from app.models import entities  # noqa: F401  注册 SQLAlchemy 模型
 from app.services.api_keys import ApiKeyService
 from app.services.mcp_pool import get_mcp_pool
+from app.services.run_stream import get_run_hub
 from app.services.tenants import bootstrap_default_tenant
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,8 @@ async def lifespan(app: FastAPI):
     run_migrations()
     bootstrap_admin_key()
     yield
-    # 回收 MCP 子进程，避免退出时留下孤儿
+    # 取消在途运行（避免留下半截任务），再回收 MCP 子进程
+    await get_run_hub().close_all()
     await get_mcp_pool().close_all()
     shutdown_telemetry()
 

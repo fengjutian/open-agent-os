@@ -219,6 +219,28 @@ run.started → delta(delta…) → [tool.call → tool.result …] → complete
 - 服务端使用纯 ASGI 中间件：`BaseHTTPMiddleware` 对 `StreamingResponse` 是已知坑，
   我们直接绕开它。
 
+### 断线续传
+
+**客户端断开不会杀死运行**：运行跑在独立任务里，断开只是退订；它会继续跑完并落库。
+
+重连时用回放端点按游标续订：
+
+```bash
+curl -N -H "Authorization: Bearer $API_KEY" \
+  "localhost:8000/api/v1/runs/<RUN_ID>/events/stream?after=0"
+# 也支持标准头：-H "Last-Event-ID: 5"
+```
+
+- 每条事件都带 `id: <seq>`，回放从 `after` 之后开始；
+- 运行仍在进行时会持续跟随，直到终态或 `RUN_STREAM_MAX_SECONDS`；
+- 结束时发一条 `stream.end`（带 `status`），前端据此判断成败。
+
+**能力边界**：增量文本（`delta`）不落库，所以重连能拿到完整生命周期事件与
+**最终消息**，但拿不回断流前已经显示的那段文字。前端断流后会提示"正在恢复"，
+并用回放到的 `completed` 事件替换临时草稿。
+
+SQLite 下需要 WAL（已在连接时自动开启），否则运行任务写、回放端点读会互相阻塞。
+
 ## 评测与回归
 
 数据集是 JSON，用例 = 一次「发消息 + 断言」，可在 CI 里跑：
