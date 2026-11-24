@@ -25,7 +25,11 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.telemetry import span
 from app.models.entities import ToolDefinition, now_utc
-from app.services.artifacts import ArtifactStore, collect_from_workspace
+from app.services.artifacts import (
+    ArtifactStore,
+    collect_from_workspace,
+    resolve_input_mounts,
+)
 from app.services.executor_client import ExecutorClient, ExecutorRun
 from app.services.mcp_client import McpError
 from app.services.mcp_pool import get_mcp_pool
@@ -197,6 +201,11 @@ async def _execute_executor(
         settings.executor_timeout_seconds,
     )
 
+    # 输入文件：只能挂本租户登记过的产物，且一律只读。
+    inputs: list[dict[str, str]] = []
+    if artifact_store is not None:
+        inputs = resolve_input_mounts(artifact_store, config, arguments)
+
     with span(
         "executor.run",
         **{"executor.runtime": runtime, "executor.image": image},
@@ -207,6 +216,7 @@ async def _execute_executor(
             command=command,
             image=image,
             timeout_seconds=timeout,
+            inputs=inputs,
         )
         current.set_attribute("executor.status", run.status)
         if run.exit_code is not None:

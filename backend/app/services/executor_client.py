@@ -129,6 +129,7 @@ class ExecutorClient:
         command: str,
         image: str,
         timeout_seconds: float,
+        inputs: list[dict[str, str]] | None = None,
     ) -> ExecutorRun:
         if not settings.executor_enabled:
             raise AppError(
@@ -155,6 +156,8 @@ class ExecutorClient:
                 "max_output_bytes": settings.executor_max_output_bytes,
                 "max_artifact_bytes": settings.executor_max_artifact_bytes,
                 "max_artifacts": settings.executor_max_artifacts,
+                # 只读输入挂载：来源与目标都已由 Python 侧校验过
+                "inputs": inputs or [],
             }
             # 显式指定容器用户：与 workspace 的属主保持一致，避免放宽目录权限。
             payload["user"] = settings.executor_user or _default_user()

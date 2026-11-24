@@ -51,7 +51,7 @@ from app.schemas.dto import (
     ToolRead,
     ToolUpdate,
 )
-from app.services.artifacts import stored_path
+from app.services.artifacts import MAX_INPUTS, safe_input_target, stored_path
 from app.services.audit import AuditService
 from app.services.audit_chain import verify_chain
 from app.services.mcp_client import McpError, McpStdioClient
@@ -170,6 +170,76 @@ def _assert_executor_config(payload: ToolCreate) -> None:
             f"executor 工具的 input_schema 必须把 {argument_name} 列为必填",
             status_code=422,
         )
+
+    _assert_executor_inputs(config, schema)
+
+
+def _assert_executor_inputs(config: dict, schema: dict) -> None:
+    """校验 config.inputs 的声明。
+
+    每项形如 `{"argument": "file_id", "target": "input/data.csv", "required": true}`：
+    `argument` 是工具参数名（模型把产物 id 放在这里），`target` 是容器内
+    /workspace 下的相对路径。注册时就校验一遍，别等到执行时才报错。
+    """
+    declarations = config.get("inputs")
+    if declarations is None:
+        return
+    if not isinstance(declarations, list):
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "config.inputs 必须是数组",
+            status_code=422,
+        )
+    if len(declarations) > MAX_INPUTS:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"config.inputs 最多 {MAX_INPUTS} 项",
+            status_code=422,
+        )
+
+    properties = schema.get("properties")
+    properties = properties if isinstance(properties, dict) else {}
+    seen_targets: set[str] = set()
+
+    for item in declarations:
+        if not isinstance(item, dict):
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                "config.inputs 的每一项必须是对象",
+                status_code=422,
+            )
+        argument = item.get("argument")
+        if not isinstance(argument, str) or not _COMMAND_ARGUMENT_PATTERN.match(argument):
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                "config.inputs 的 argument 必须匹配 ^[a-z_][a-z0-9_]{0,63}$",
+                status_code=422,
+            )
+        target = safe_input_target(str(item.get("target") or ""))
+        if target is None:
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                "config.inputs 的 target 必须是 /workspace 下的安全相对路径（不能含 .. 或盘符）",
+                status_code=422,
+            )
+        if target in seen_targets:
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                f"config.inputs 的 target 重复：{target}",
+                status_code=422,
+            )
+        seen_targets.add(target)
+
+        # 承载产物的参数必须在 schema 里声明为 string，否则模型传不了 id
+        property_schema = properties.get(argument)
+        if not isinstance(property_schema, dict) or not _is_string_type(
+            property_schema.get("type")
+        ):
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                f"executor 工具的 input_schema 必须把 {argument} 声明为 string",
+                status_code=422,
+            )
 
 
 def mcp_tool_name(server_name: str, remote_name: str) -> str:

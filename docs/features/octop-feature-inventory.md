@@ -13,7 +13,7 @@
 | API 路由模块 | 55 | 6（routes / tool_routes / auth_routes / run_routes / skill_routes / tenant_routes） |
 | 前端 | dashboard（React，含插件渲染宿主）+ desktop + mobile | 6 个 ts/tsx 文件、834 行 |
 | 内置插件 | 26 个（air-quality、bilibili-anime、weather、tetris…） | 2 个内建工具（echo / current_time） |
-| 测试文件 | 未见统计 | 31 个文件、352 条用例 |
+| 测试文件 | 未见统计 | 41 个文件、518 条用例 |
 
 **结论先行**：1:1 对齐 ≈ 20 倍代码量。下面按域拆开，逐项标注我们的位置。
 
@@ -53,7 +53,7 @@
 | Octop UI 渲染协议（`octop_ui.renderer`） | 26 个内置插件 | ❌ |
 | MCP 客户端 | `api/routers/internal_mcp`、`infra/connectors` MCP builders | ✅（stdio、连接池） |
 | MCP 服务器管理 / 市场 | `infra/connectors`（45 文件：catalog、credential、oauth） | ❌ 只支持环境变量声明 |
-| 隔离执行器（Docker） | 本项目 `rust-executor`（对标物在 Octop 是 workspace/terminal） | 🟡 另一个会话在做 |
+| 隔离执行器（Docker） | 本项目 `rust-executor`（对标物在 Octop 是 workspace/terminal） | ✅（见 [executor-input-mounts.md](executor-input-mounts.md)） |
 | HITL 人工审批 | `infra/gateway/hitl`（store / coordinator / format）、`agents/security/hitl_session` | ✅（见 [hitl.md](hitl.md)） |
 | 二进制读取守卫、图片工作区中间件 | `middleware/binary_read_guard.py`、`workspace_image.py` | ❌ |
 
@@ -142,7 +142,7 @@
 | 语音 STT / TTS | `infra/voice`、`api/routers/voice` | ❌ |
 | 媒体生成（图片等） | `api/routers/media_generation`、`agents/settings/media_generation.py` | ❌ |
 | 文件上传 / 附件 | `api/routers/uploads`、`api/common/attachments.py` | ❌ |
-| 工作区文件系统 / 终端 | `api/routers/workspace`、`filesystem`、`terminal`、`infra/agents/workspace` | 🟡 RCE 执行器（未完成） |
+| 工作区文件系统 / 终端 | `api/routers/workspace`、`filesystem`、`terminal`、`infra/agents/workspace` | 🟡 隔离执行器已实现，但只挂只读 workspace + 只读输入，不提供交互式终端 |
 | 远程桌面 | `infra/desktop`、`api/routers/internal` 相关 | ❌ |
 | 远程 Android | `infra/mobile`（adb / probe） | ❌ |
 | 浏览器环境 | `infra/browser` | ❌ |

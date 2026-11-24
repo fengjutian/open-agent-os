@@ -352,7 +352,8 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 - `config` 不允许出现 `command` / `argv` / `cmd`——命令必须来自调用参数；
 - `input_schema` 必须把 `config.command_argument`（默认 `command`）声明为 `string`
   且列为必填；
-- `config.image` 只允许字母、数字与 `. _ - / : @`，且不能以 `-` 开头。
+- `config.image` 只允许字母、数字与 `. _ - / : @`，且不能以 `-` 开头；
+- `config.inputs` 见下方「输入文件挂载」。
 
 调用：`{"arguments": {"command": "print(1+1)"}}`。成功响应节选：
 
@@ -383,6 +384,42 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 | `executor_not_available` | 执行器未启用、找不到可执行文件或 Docker 不可用 |
 | `executor_error` | 执行器返回无法解析或不兼容的结果 |
 | `tool_arguments_invalid` | 缺少命令参数或参数不符合 schema |
+
+#### 输入文件挂载
+
+`config.inputs` 声明哪些调用参数承载**产物 id**，以及它们要挂到容器里的什么位置：
+
+```json
+{
+  "config": {
+    "runtime": "python",
+    "inputs": [
+      {"argument": "file_id", "target": "input/data.csv", "required": true}
+    ]
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {"command": {"type": "string"}, "file_id": {"type": "string"}},
+    "required": ["command"],
+    "additionalProperties": false
+  }
+}
+```
+
+- `argument`：工具参数名，模型把**产物 id**（`ToolArtifact.id`）放在这里；
+- `target`：容器内 `/workspace` 下的相对路径；
+- `required`：缺参时直接失败（`false` 时缺参就少挂一个）。
+
+注册期约束（违反返回 422 `validation_error`）：`inputs` 必须是数组、至多 16 项、
+`argument` 匹配 `^[a-z_][a-z0-9_]{0,63}$`、`target` 必须是安全相对路径
+（不能含 `..`、绝对路径或盘符，首段不能是 `output`）、`target` 不能重复、
+且 `argument` 必须在 `input_schema` 里声明为 `string`。
+
+执行期：来源**只能是当前租户登记过的产物**（`ToolArtifact`），
+挂载一律只读（`:ro`），不区分「产物不存在」与「属于别的租户」——
+两种情形都是 `status=failed` + `error_code=tool_arguments_invalid`。
+
+详见 [features/executor-input-mounts.md](features/executor-input-mounts.md)。
 
 产物接口：
 

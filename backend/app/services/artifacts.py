@@ -15,10 +15,12 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.errors import AppError, ErrorCode
 from app.core.tenancy import current_tenant
 from app.models.entities import ToolArtifact, now_utc
 from app.services.executor_client import ExecutorArtifact
@@ -146,6 +148,17 @@ class ArtifactStore:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def resolve_input(self, artifact_id: str) -> Path | None:
+        """把产物 id 还原成宿主机路径。
+
+        租户隔离靠 ORM 过滤：别的租户的 artifact_id 在这里查不到，
+        因此输入挂载不可能拿到别人的文件。
+        """
+        artifact = self._db.get(ToolArtifact, artifact_id)
+        if artifact is None:
+            return None
+        return stored_path(artifact)
+
     def persist(
         self,
         *,
@@ -212,3 +225,104 @@ def stored_path(artifact: ToolArtifact) -> Path | None:
     if not candidate.is_relative_to(root) or not candidate.is_file():
         return None
     return candidate
+
+
+# 输入挂载：容器内 /workspace 下的目标路径
+MAX_INPUT_TARGET = 200
+MAX_INPUTS = 16
+
+
+def safe_input_target(raw: str) -> str | None:
+    """输入文件在容器里的目标路径必须是 /workspace 下的安全相对路径。
+
+    与 Rust 侧 `check_input_target` 同一套规则：两边都校验，
+    一边被绕过时另一边仍然拦得住。
+    """
+    if not isinstance(raw, str):
+        return None
+    target = raw.strip().replace("\\", "/")
+    if not target or len(target) > MAX_INPUT_TARGET:
+        return None
+    if target.startswith("/") or ":" in target:
+        return None
+    parts = target.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+    # 产物目录是执行器收集产物的地方，不允许被输入挂载遮住
+    if parts[0] == "output":
+        return None
+    return "/".join(parts)
+
+
+def resolve_input_mounts(
+    store: ArtifactStore,
+    config: dict[str, Any],
+    arguments: dict[str, Any],
+) -> list[dict[str, str]]:
+    """把工具 config 里的 `inputs` 声明解析成具体挂载。
+
+    声明形如::
+
+        "inputs": [{"argument": "file_id", "target": "input/data.csv", "required": true}]
+
+    `argument` 是工具参数名，模型把**产物 id** 放在这个参数里；
+    `target` 是容器内 /workspace 下的相对路径。
+
+    来源只能是**当前租户登记过的产物**——挂载任意宿主机路径等于把宿主机的
+    文件系统交出去，所以这里只认数据库里的产物记录。
+    """
+    declarations = config.get("inputs")
+    if not declarations:
+        return []
+    if not isinstance(declarations, list):
+        raise AppError(
+            ErrorCode.TOOL_ARGUMENTS_INVALID,
+            "config.inputs 必须是数组",
+            status_code=422,
+        )
+    if len(declarations) > MAX_INPUTS:
+        raise AppError(
+            ErrorCode.TOOL_ARGUMENTS_INVALID,
+            f"config.inputs 最多 {MAX_INPUTS} 项",
+            status_code=422,
+        )
+
+    mounts: list[dict[str, str]] = []
+    for item in declarations:
+        if not isinstance(item, dict):
+            raise AppError(
+                ErrorCode.TOOL_ARGUMENTS_INVALID,
+                "config.inputs 的每一项必须是对象",
+                status_code=422,
+            )
+        argument = str(item.get("argument") or "")
+        target = safe_input_target(str(item.get("target") or ""))
+        required = bool(item.get("required"))
+        if not argument or target is None:
+            raise AppError(
+                ErrorCode.TOOL_ARGUMENTS_INVALID,
+                "config.inputs 的每一项都要有 argument 与合法的 target",
+                status_code=422,
+            )
+
+        value = arguments.get(argument)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            if required:
+                raise AppError(
+                    ErrorCode.TOOL_ARGUMENTS_INVALID,
+                    f"缺少输入文件参数 {argument}",
+                    status_code=422,
+                )
+            continue
+
+        artifact_id = str(value).strip()
+        source = store.resolve_input(artifact_id)
+        if source is None:
+            # 不区分"不存在"和"属于别的租户"：跨租户时不该泄露是否存在
+            raise AppError(
+                ErrorCode.TOOL_ARGUMENTS_INVALID,
+                f"输入产物 {artifact_id} 不存在或不可用",
+                status_code=422,
+            )
+        mounts.append({"source": str(source), "target": target})
+    return mounts

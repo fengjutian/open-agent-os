@@ -101,7 +101,7 @@ pub struct ExecutionRequest {
 }
 
 /// 一个只读输入挂载：宿主机文件 → 容器内 `/workspace` 下的相对路径。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputMount {
     /// 宿主机上的文件路径（绝对路径）。
@@ -411,6 +411,7 @@ mod tests {
             max_artifact_bytes: Some(1024),
             max_artifacts: Some(5),
             user: None,
+            inputs: Vec::new(),
         }
     }
 
@@ -431,6 +432,89 @@ mod tests {
         let mut req = request(&dir);
         req.schema_version = "2".to_string();
         assert!(req.into_job().unwrap_err().0.contains("schema_version"));
+    }
+
+    #[test]
+    fn accepts_a_valid_input_mount() {
+        let dir = workspace();
+        let source = dir.join("input.csv");
+        std::fs::write(&source, b"a,b\n").unwrap();
+
+        let mut req = request(&dir);
+        req.inputs = vec![InputMount {
+            source: source.to_string_lossy().into_owned(),
+            target: "input/data.csv".to_string(),
+        }];
+        let job = req.into_job().unwrap();
+        assert_eq!(job.inputs.len(), 1);
+        assert_eq!(job.inputs[0].target, "input/data.csv");
+    }
+
+    #[test]
+    fn rejects_escaping_input_targets() {
+        let dir = workspace();
+        let source = dir.join("input.csv");
+        std::fs::write(&source, b"a,b\n").unwrap();
+
+        for target in [
+            "../escape.csv",
+            "/etc/passwd",
+            "input/../../escape.csv",
+            "output/report.csv",
+            "C:\\windows\\system32",
+        ] {
+            let mut req = request(&dir);
+            req.inputs = vec![InputMount {
+                source: source.to_string_lossy().into_owned(),
+                target: target.to_string(),
+            }];
+            assert!(
+                req.into_job().is_err(),
+                "target should be rejected: {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_non_regular_input_source() {
+        let dir = workspace();
+        let missing = dir.join("nope.csv");
+
+        let mut req = request(&dir);
+        req.inputs = vec![InputMount {
+            source: missing.to_string_lossy().into_owned(),
+            target: "input/data.csv".to_string(),
+        }];
+        assert!(req.into_job().is_err());
+
+        // 目录不是普通文件
+        let mut req = request(&dir);
+        req.inputs = vec![InputMount {
+            source: dir.to_string_lossy().into_owned(),
+            target: "input/data.csv".to_string(),
+        }];
+        assert!(req.into_job().is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_input_targets() {
+        let dir = workspace();
+        let source = dir.join("input.csv");
+        std::fs::write(&source, b"a,b\n").unwrap();
+
+        let mut req = request(&dir);
+        let path = source.to_string_lossy().into_owned();
+        req.inputs = vec![
+            InputMount {
+                source: path.clone(),
+                target: "input/data.csv".to_string(),
+            },
+            InputMount {
+                source: path,
+                target: "input/data.csv".to_string(),
+            },
+        ];
+        assert!(req.into_job().unwrap_err().0.contains("重复"));
     }
 
     #[test]

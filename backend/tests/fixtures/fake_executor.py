@@ -103,6 +103,13 @@ def main() -> None:
         sys.stdout.write("this is not json")
         sys.stdout.flush()
         raise SystemExit(0)
+    elif mode == "echo_inputs":
+        # 把收到的输入挂载原样回显：验证 Python → 协议 → 执行器这一段没丢东西
+        emit(
+            result(
+                stdout=json.dumps(request.get("inputs") or [], ensure_ascii=False),
+            )
+        )
     elif mode == "traversal":
         # 同时在 output 之外写一个文件：即使它被写出来，也不应该被收集。
         (workspace / "evil.txt").write_bytes(b"evil")

@@ -415,7 +415,31 @@ mod tests {
     }
 
     #[test]
-    fn mount_path_normalizes_windows_paths() {        assert_eq!(
+    fn build_args_mounts_inputs_read_only_under_workspace() {
+        let mut job = job();
+        job.inputs = vec![InputMount {
+            source: r"C:\data\report.csv".to_string(),
+            target: "input/report.csv".to_string(),
+        }];
+        let args = build_args(&job, "agent-exec-test");
+        let joined = args.join(" ");
+
+        // 输入文件必须只读挂载，且落在 /workspace 下
+        assert!(
+            joined.contains("C:/data/report.csv:/workspace/input/report.csv:ro"),
+            "input mount missing: {joined}"
+        );
+        // 不能出现可写挂载
+        assert!(!joined.contains(":/workspace/input/report.csv:rw"));
+        // workspace 仍是可写的（产物要写进去）
+        assert!(joined.contains("C:/tmp/agent-workspace:/workspace:rw"));
+        // 只挂这一个输入，不该出现宿主机目录
+        assert!(!joined.contains("docker.sock"));
+    }
+
+    #[test]
+    fn mount_path_normalizes_windows_paths() {
+        assert_eq!(
             mount_path(Path::new(r"C:\Users\dev\workspace")),
             "C:/Users/dev/workspace"
         );
