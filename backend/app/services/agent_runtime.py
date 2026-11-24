@@ -26,6 +26,7 @@ from app.services.context import (
     build_messages,
 )
 from app.services.conversation_modes import filter_tool_specs, mode_hint, normalize_mode
+from app.services.memory import retrieve_block
 from app.services.model_gateway import (
     ModelProvider,
     ModelReply,
@@ -335,6 +336,23 @@ class AgentRuntime:
         hint = mode_hint(resolved_mode)
         if hint:
             system_prompt = f"{system_prompt}\n\n{hint}".strip()
+
+        # 长期记忆：只注入与本次输入相关的条目；没有记忆时这里是空操作
+        if settings.memory_enabled:
+            memory_block = retrieve_block(
+                db,
+                user_content,
+                agent_id=agent.id,
+                limit=settings.memory_inject_limit,
+            )
+            if memory_block:
+                system_prompt = f"{system_prompt}\n\n{memory_block}".strip()
+                log_event(
+                    logger,
+                    "memory injected",
+                    conversation_id=conversation.id,
+                    memory_chars=len(memory_block),
+                )
 
         recorder.event(
             "run.started",

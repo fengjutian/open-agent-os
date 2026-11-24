@@ -60,6 +60,27 @@ class Conversation(TenantScoped):
         back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
+class Memory(TenantScoped):
+    """长期记忆：跨会话保留的事实、偏好与约定。
+
+    agent_id 为空表示租户级记忆（所有 Agent 可见）；否则只对该 Agent 生效。
+    """
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    source_conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
 class CronJob(TenantScoped):
     """定时任务：按 cron 表达式周期性让某个 Agent 跑一次提示词。
 

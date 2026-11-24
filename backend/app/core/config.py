@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     context_summary_trigger_ratio: float = 0.8
     context_summary_keep_messages: int = 6
     context_summary_max_chars: int = 2000
+    # 长期记忆：每次运行按相关度注入若干条
+    memory_enabled: bool = True
+    memory_inject_limit: int = 5
+    memory_min_score: float = 0.12
+    # 单个会话最多提炼多少条记忆
+    memory_distill_limit: int = 5
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）
     default_conversation_mode: str = "craft"
     # 定时任务：是否启动后台调度循环，以及轮询间隔（秒）

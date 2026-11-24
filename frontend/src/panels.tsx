@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,Approval,AuditLog,CronJob,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,CronJob,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -571,6 +571,87 @@ export function ApprovalPanel({onError,onChanged}:{onError:(err:unknown)=>void;o
           </div>
         </div>)}
         {!items.length && <p className="muted">{loading ? "加载中…" : "没有待审批的调用。"}</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+export function MemoryPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)=>void}) {
+  const [items,setItems]=useState<MemoryRow[]>([]);
+  const [content,setContent]=useState("");
+  const [scope,setScope]=useState("");
+  const [query,setQuery]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+
+  const reload = useCallback(async (q?:string) => {
+    try { setItems((await api.memories(q)).items); }
+    catch(err) { onError(err); }
+    finally { setLoading(false); }
+  },[onError]);
+
+  useEffect(()=>{ reload(); },[reload]);
+
+  async function add(event:React.FormEvent){
+    event.preventDefault();
+    if(!content.trim()) return;
+    setBusy(true);
+    try{
+      await api.createMemory({content:content.trim(), agent_id:scope||undefined});
+      setContent("");
+      await reload(query||undefined);
+    }catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  async function remove(item:MemoryRow){
+    setBusy(true);
+    try{ await api.deleteMemory(item.id); await reload(query||undefined); }
+    catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>记一条</h3>
+      <form className="stack" onSubmit={add}>
+        <textarea className="field" rows={4} value={content} onChange={e=>setContent(e.target.value)}
+          placeholder="值得跨会话记住的事实，例如：项目统一使用深色主题" />
+        <select className="field" value={scope} onChange={e=>setScope(e.target.value)}>
+          <option value="">租户级（所有 Agent 可见）</option>
+          {agents.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <button className="primary" type="submit" disabled={busy || !content.trim()}>保存记忆</button>
+      </form>
+      <h3>检索</h3>
+      <div className="inline-form">
+        <input className="field" value={query} onChange={e=>setQuery(e.target.value)} placeholder="按关键词过滤" />
+        <button className="ghost" type="button" onClick={()=>reload(query||undefined)} disabled={busy}>搜索</button>
+      </div>
+      <p className="muted">
+        运行时按词法相关度自动注入相关条目（最多 5 条）。这是关键词召回，不是语义检索。
+      </p>
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>长期记忆</b><small>{items.length} 条</small></div>
+      </div>
+      <div className="panel-body">
+        <table className="table">
+          <thead><tr><th>内容</th><th>范围</th><th>时间</th><th></th></tr></thead>
+          <tbody>
+            {items.map(item=><tr key={item.id}>
+              <td>{item.content}</td>
+              <td className="muted small">{item.agent_id ? "Agent" : "租户"}</td>
+              <td className="muted small">{time(item.created_at)}</td>
+              <td className="actions">
+                <button className="ghost" disabled={busy} onClick={()=>remove(item)}>删除</button>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!items.length && <p className="muted">{loading ? "加载中…" : "还没有记忆。"}</p>}
       </div>
     </section>
   </div>;

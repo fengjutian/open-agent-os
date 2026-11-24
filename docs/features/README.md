@@ -10,7 +10,8 @@
 | 会话模式 Ask / Plan / Craft | ✅ 已实现 | [conversation-modes.md](conversation-modes.md) | `68287ff` |
 | 定时任务 cron | ✅ 已实现 | [cron.md](cron.md) | `b99d2b2` |
 | 人工审批 HITL | ✅ 已实现 | [hitl.md](hitl.md) | `e5bf6e3` |
-| 上下文压缩（历史摘要） | ✅ 已实现 | [context-summary.md](context-summary.md) | 本次提交 |
+| 上下文压缩（历史摘要） | ✅ 已实现 | [context-summary.md](context-summary.md) | `072c456` |
+| 长期记忆 | ✅ 已实现 | [long-term-memory.md](long-term-memory.md) | 本次提交 |
 | 工具结果大 payload 旁路 | 📝 设计稿 | [tool-result-offload.md](tool-result-offload.md) | — |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
@@ -28,6 +29,7 @@
 | 定时任务 | cron 表达式、进程内调度、执行记录 | `services/cron.py`、`cron_scheduler.py`、`api/cron_routes.py` |
 | 人工审批 | 工具挂起、批准/拒绝、检查点续跑 | `services/approvals.py`、`tool_gateway.py`、`api/approval_routes.py` |
 | 上下文压缩 | 历史摘要替代整条丢弃、增量摘要 | `services/summarizer.py`、`agent_runtime.py`、`context.py` |
+| 长期记忆 | 词法召回、按需注入、会话提炼 | `services/memory.py`、`api/memory_routes.py` |
 | 认证 | API Key、OIDC/JWT、三角色 RBAC | `services/api_keys.py`、`core/security.py` |
 | 多租户 | 数据层强制隔离、组织与成员、成员覆盖 IdP 角色 | `db/tenancy.py`、`services/tenants.py` |
 | 限流 | 每分钟限流、日配额（内存 / Redis） | `services/rate_limit.py` |
@@ -40,7 +42,6 @@
 
 | 批次 | 功能 | 依赖 |
 |---|---|---|
-| B2 | 长期记忆（摘要 + 检索） | 无 |
 | B2 | 子代理（派生运行） | 无 |
 | B3 | 知识库 RAG | embedding 服务 |
 | B3 | 用量报表 | 无 |

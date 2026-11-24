@@ -63,6 +63,11 @@ export interface Membership {
  id:string; subject:string; role:"admin"|"developer"|"viewer"|string; created_at:string;
 }
 
+export interface Memory {
+ id:string; agent_id:string|null; content:string; tags:string[];
+ source_conversation_id:string|null; created_at:string;
+}
+
 export interface Approval {
  id:string; run_id:string; tool_name:string; call_id:string|null;
  arguments:Record<string,unknown>; status:string; decided_by:string|null;

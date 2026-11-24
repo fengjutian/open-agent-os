@@ -138,7 +138,18 @@ def main() -> int:
         print("[ok] 批准后剩余待审批:", remaining)
         assert remaining == 0
 
-        # ---- 8. 窄屏 / 手机宽度 ----
+        # ---- 8. 长期记忆 ----
+        page.click(".nav button:has-text('记忆')")
+        page.wait_for_timeout(600)
+        page.fill(".sessions textarea", "项目统一使用深色主题")
+        page.click("button:has-text('保存记忆')")
+        page.wait_for_timeout(900)
+        rows = page.locator("table.table tbody tr").count()
+        print("[ok] 记忆条数:", rows)
+        assert rows >= 1
+        page.screenshot(path=str(shots / "10-memory.png"))
+
+        # ---- 9. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})
         page.wait_for_timeout(500)

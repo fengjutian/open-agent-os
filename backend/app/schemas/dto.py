@@ -269,6 +269,25 @@ class ToolInvocationRead(BaseModel):
     finished_at: UtcDatetime | None
 
 
+class MemoryCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    # 为空表示租户级记忆（所有 Agent 可见）
+    agent_id: str | None = None
+    tags: list[str] = Field(default_factory=list, max_length=10)
+    source_conversation_id: str | None = None
+
+
+class MemoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str | None = None
+    content: str
+    tags: list[str] = Field(default_factory=list)
+    source_conversation_id: str | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
 class ApprovalPending(BaseModel):
     """运行停下等待人工审批（HTTP 202）。"""
 

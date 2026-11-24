@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -87,6 +87,11 @@ export const api={
  updateMembership:(id:string,role:string)=>
   request<Membership>(`/memberships/${id}`,{method:"PATCH",body:JSON.stringify({role})}),
  removeMembership:(id:string)=>request<void>(`/memberships/${id}`,{method:"DELETE"}),
+
+ memories:(q?:string)=>request<Page<Memory>>(`/memories${q?`?q=${encodeURIComponent(q)}`:""}`),
+ createMemory:(data:{content:string;tags?:string[];agent_id?:string})=>
+  request<Memory>("/memories",{method:"POST",body:JSON.stringify(data)}),
+ deleteMemory:(id:string)=>request<void>(`/memories/${id}`,{method:"DELETE"}),
 
  approvals:(status="pending")=>request<Page<Approval>>(`/approvals?status=${status}`),
  approve:(id:string,reason?:string)=>request<SendMessageResponse | {status:string}>(`/approvals/${id}/approve`,{method:"POST",body:JSON.stringify({reason})}),

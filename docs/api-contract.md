@@ -41,6 +41,17 @@ Authorization: Bearer oak_xxxxxxxx
 没有成员的 OIDC 用户一律 403。为不存在的租户签发密钥返回 404；
 租户 `status=disabled` 后该租户的所有请求 403。
 
+### 长期记忆
+
+- `POST /memories`：写入一条记忆，body `{ content, agent_id?, tags?, source_conversation_id? }`；
+  `agent_id` 为空表示租户级（所有 Agent 可见）。
+- `GET /memories?q=&agent_id=`：列表，`q` 是包含匹配。
+- `DELETE /memories/{id}`：删除，204。
+- `POST /conversations/{id}/memories/distill`：把该会话交给模型提炼 0-N 条记忆并落库；
+  模型返回非 JSON 时返回空数组而不是报错。
+
+运行时按**词法相关度**自动注入相关记忆（最多 `MEMORY_INJECT_LIMIT` 条），
+注入位置是 system prompt 末尾的 `[相关记忆]` 块；检索异常一律降级为"没有记忆"。
 ### 人工审批（HITL）
 
 标了 `requires_approval` 的工具在执行前会停：
