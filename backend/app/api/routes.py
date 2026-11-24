@@ -22,6 +22,7 @@ from app.schemas.dto import (
     AgentUpdate,
     ConversationCreate,
     ConversationRead,
+    ConversationUpdate,
     ErrorEnvelope,
     MessageCreate,
     MessageRead,
@@ -29,6 +30,7 @@ from app.schemas.dto import (
     SendMessageResponse,
 )
 from app.services.agent_runtime import AgentRuntime
+from app.services.conversation_modes import normalize_mode
 from app.services.rate_limit import enforce_run_quota
 from app.services.run_stream import get_run_hub
 from app.services.skills import assert_skills_exist
@@ -138,8 +140,33 @@ def create_conversation(
     db: Session = Depends(get_db),
 ):
     get_or_404(db, Agent, agent_id, "Agent")
-    item = Conversation(agent_id=agent_id, title=payload.title)
+    item = Conversation(
+        agent_id=agent_id,
+        title=payload.title,
+        mode=normalize_mode(payload.mode, default=settings.default_conversation_mode),
+    )
     db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=ConversationRead,
+    responses={**_NOT_FOUND, 422: {"model": ErrorEnvelope}},
+)
+def update_conversation(
+    conversation_id: str,
+    payload: ConversationUpdate,
+    _principal: Principal = Depends(require_permission(WRITE_AGENTS)),
+    db: Session = Depends(get_db),
+):
+    item = get_or_404(db, Conversation, conversation_id, "Conversation")
+    if payload.title is not None:
+        item.title = payload.title
+    if payload.mode is not None:
+        item.mode = normalize_mode(payload.mode)
     db.commit()
     db.refresh(item)
     return item
@@ -221,7 +248,9 @@ async def send_message(
     run_id = f"run_{uuid4().hex}"
     token = run_id_var.set(run_id)
     try:
-        user_message, assistant_message = await AgentRuntime().respond(db, conversation, payload.content)
+        user_message, assistant_message = await AgentRuntime().respond(
+            db, conversation, payload.content, mode=payload.mode
+        )
     except AppError:
         db.rollback()
         raise
@@ -283,7 +312,9 @@ async def stream_message(
                 )
                 return
 
-            async for event in AgentRuntime().respond_stream(session, conversation, payload.content):
+            async for event in AgentRuntime().respond_stream(
+                session, conversation, payload.content, mode=payload.mode
+            ):
                 if event.get("type") == "completed":
                     _persist_completed_event(session, run_id, event)
                 channel.publish(event)

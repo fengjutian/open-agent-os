@@ -84,6 +84,22 @@ class AgentRead(BaseModel):
 
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", max_length=200)
+    # ask / plan / craft；缺省用服务端默认值（craft）
+    mode: str | None = Field(default=None, pattern="^(ask|plan|craft)$")
+
+
+class ConversationUpdate(BaseModel):
+    """PATCH 语义：只改发过来的字段；显式 null 一律拒绝。"""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    mode: str | None = Field(default=None, pattern="^(ask|plan|craft)$")
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self):
+        for name in ("title", "mode"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} 不能显式设为 null")
+        return self
 
 
 class ConversationRead(BaseModel):
@@ -91,12 +107,15 @@ class ConversationRead(BaseModel):
     id: str
     agent_id: str
     title: str
+    mode: str
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=30000)
+    # 本轮的临时模式覆盖，不改变会话上的粘性设置
+    mode: str | None = Field(default=None, pattern="^(ask|plan|craft)$")
 
 
 class MessageRead(BaseModel):
@@ -139,6 +158,8 @@ class ToolCreate(BaseModel):
     # 命令必须来自调用参数（config 里不允许携带命令）。
     config: dict[str, Any] | None = None
     enabled: bool = True
+    # 声明该工具没有副作用；ask / plan 模式下只有只读工具对模型可见
+    read_only: bool = False
 
 
 class ToolUpdate(BaseModel):
@@ -146,6 +167,7 @@ class ToolUpdate(BaseModel):
     permissions: list[str] | None = Field(default=None, max_length=20)
     timeout_seconds: float | None = Field(default=None, gt=0, le=60)
     enabled: bool | None = None
+    read_only: bool | None = None
 
 
 class ToolRead(BaseModel):
@@ -159,6 +181,7 @@ class ToolRead(BaseModel):
     execution_type: str
     config: dict[str, Any] | None = None
     enabled: bool
+    read_only: bool = False
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

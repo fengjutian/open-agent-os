@@ -2,13 +2,13 @@
 
 ## V0.1
 - Agent：id、name、description、system_prompt、model、created_at、updated_at。
-- Conversation：id、agent_id、title、created_at、updated_at。
+- Conversation：id、agent_id、title、mode（ask/plan/craft）、created_at、updated_at。
 - Message：id、conversation_id、role、content、created_at。
 
 关系：Agent 1:N Conversation；Conversation 1:N Message。
 
 ## V0.2 工具治理
-- ToolDefinition：id、name（唯一）、description、input_schema（JSON Schema）、permissions、timeout_seconds、execution_type、config、enabled、created_at、updated_at。
+- ToolDefinition：id、name（唯一）、description、input_schema（JSON Schema）、permissions、timeout_seconds、execution_type、config、enabled、read_only、created_at、updated_at。
 
 `execution_type`：`builtin`（平台内建实现）/ `mcp`（转发已声明的 MCP 服务器）/
 `executor`（Docker 隔离执行）。`config` 在 MCP 场景下形如

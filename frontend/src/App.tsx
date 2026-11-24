@@ -61,6 +61,16 @@ export default function App(){
   try{setMessages((await api.messages(target.id)).items);}catch(err){handleError(err);}
  }
 
+ /** 切换会话模式：写回服务端，保证刷新后仍是同一模式。 */
+ async function changeMode(mode:"ask"|"plan"|"craft"){
+  if(!conversation||conversation.mode===mode) return;
+  try{
+   const updated=await api.updateConversation(conversation.id,{mode});
+   setConversation(updated);
+   setConversations(old=>old.map(item=>item.id===updated.id?updated:item));
+  }catch(err){handleError(err);}
+ }
+
  async function addAgent(){
   const name=prompt("Agent 名称");
   if(!name?.trim()) return;
@@ -243,7 +253,12 @@ export default function App(){
       : <>
          <div className="chat-head">
           <div><b>{conversation.title}</b><small>{activeAgent?.name} · {activeAgent?.model}</small></div>
-          <span>● Ready</span>
+          <div className="mode-switch" title="Ask 只读问答 · Plan 先出计划 · Craft 直接执行">
+           {(["ask","plan","craft"] as const).map(item=>(
+            <button key={item} className={conversation.mode===item?"active":""}
+             onClick={()=>changeMode(item)}>{item}</button>
+           ))}
+          </div>
          </div>
          <div className="messages">
           {messages.map(item=><div key={item.id} className={`message ${item.role}`}>

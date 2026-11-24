@@ -119,10 +119,25 @@ Authorization: Bearer oak_xxxxxxxx
   未传的字段保持不变；`name`/`system_prompt`/`model` **不可显式传 null**（返回 422），
   `description` 可传 null 以清空。
 - `DELETE /agents/{agent_id}`：删除 Agent，级联删除其会话与消息，返回 204。
-- `POST /agents/{agent_id}/conversations`：创建会话，body `{ "title": "New conversation" }`。
-- `GET /agents/{agent_id}/conversations`：会话列表（分页），按最近活动倒序。
+- `POST /agents/{agent_id}/conversations`：创建会话，body `{ "title": "New conversation", "mode": "craft" }`。
+  `mode` 可选，取值 `ask` / `plan` / `craft`，缺省用服务端默认值。
+- `GET /agents/{agent_id}/conversations`：会话列表（分页），按最近活动倒序，含 `mode`。
+- `PATCH /conversations/{conversation_id}`：改标题或模式，body `{ "title"?, "mode"? }`；
+  显式传 `null` 返回 422。
 - `GET /conversations/{conversation_id}/messages`：消息历史（分页），按时间正序。
-- `POST /conversations/{conversation_id}/messages`：发送消息，body `{ "content": "..." }`。
+- `POST /conversations/{conversation_id}/messages`：发送消息，body `{ "content": "...", "mode": "ask" }`。
+  `mode` 是**本轮**覆盖，不改写会话上的模式。
+
+### 会话模式
+
+| 模式 | 模型可见工具 | 行为 |
+|---|---|---|
+| `craft`（默认） | 全部（仍受策略约束） | 正常执行 |
+| `ask` | 仅只读（内建 `current_time` + 标记了 `read_only` 的工具） | 只回答问题，不改状态 |
+| `plan` | 同上 | 先产出分步计划，停下等确认 |
+
+未知取值一律按服务端默认值（`craft`）处理；被模式裁掉的工具模型**根本看不到**，
+因此不会发起调用，也不需要额外的拒绝路径。
   响应：
 
 ```json

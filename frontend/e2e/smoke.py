@@ -70,6 +70,14 @@ def main() -> int:
         print("[ok] 流式回答:", answer[:28].replace("\n", " "))
         page.screenshot(path=str(shots / "01-chat.png"))
 
+        # ---- 4b. 会话模式切换 ----
+        page.click(".mode-switch button:has-text('plan')")
+        page.wait_for_timeout(400)
+        active = page.inner_text(".mode-switch button.active")
+        assert active.lower() == "plan", f"模式未切换: {active}"
+        print("[ok] 会话模式切换到:", active)
+        page.screenshot(path=str(shots / "01b-plan-mode.png"))
+
         # ---- 5. 四个视图 ----
         for label, name in [("工具", "02-tools"), ("运行", "03-runs"), ("组织", "04-org")]:
             page.click(f".nav button:has-text('{label}')")

@@ -121,3 +121,16 @@
 .inline-form{display:flex;gap:8px;align-items:center}
 
 .inline-form .field{flex:1}
+
+/* 会话模式切换：Ask 只读 / Plan 先出计划 / Craft 直接执行 */
+.mode-switch{display:flex;gap:2px;background:#121a2a;border:1px solid #243147;border-radius:8px;padding:3px}
+
+.mode-switch button{
+ background:transparent;border:0;color:#8290a5;
+ font-size:10px;letter-spacing:.04em;text-transform:uppercase;
+ padding:4px 9px;border-radius:6px;cursor:pointer;
+}
+
+.mode-switch button:hover{color:#c8d4e6}
+
+.mode-switch button.active{background:#2a3b5c;color:#e8effa}

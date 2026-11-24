@@ -19,6 +19,7 @@ from app.core.tenancy import current_tenant
 from app.models.entities import Agent, Conversation, Message, Run, now_utc
 from app.schemas.dto import MessageRead
 from app.services.context import ChatMessage, ContextResult, build_messages
+from app.services.conversation_modes import filter_tool_specs, mode_hint, normalize_mode
 from app.services.model_gateway import (
     ModelProvider,
     ModelReply,
@@ -78,6 +79,8 @@ class AgentRuntime:
         db: Session,
         conversation: Conversation,
         user_content: str,
+        *,
+        mode: str | None = None,
     ) -> tuple[Message, Message]:
         """非流式入口：在外面套一层 span 与指标，主体逻辑在 _respond。"""
         started = time.perf_counter()
@@ -85,7 +88,7 @@ class AgentRuntime:
         with span("agent.run") as current:
             current.set_attribute("tenant.id", current_tenant())
             try:
-                result = await self._respond(db, conversation, user_content, current)
+                result = await self._respond(db, conversation, user_content, current, mode=mode)
                 outcome = "succeeded"
                 return result
             finally:
@@ -100,8 +103,10 @@ class AgentRuntime:
         conversation: Conversation,
         user_content: str,
         current,
+        *,
+        mode: str | None = None,
     ) -> tuple[Message, Message]:
-        state = self._start(db, conversation, user_content)
+        state = self._start(db, conversation, user_content, mode=mode)
         current.set_attribute("agent.id", state.agent.id)
         current.set_attribute("run.id", state.run_id)
         current.set_attribute("model", state.agent.model)
@@ -178,6 +183,8 @@ class AgentRuntime:
         db: Session,
         conversation: Conversation,
         user_content: str,
+        *,
+        mode: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """流式入口：套一层 span 与指标，主体逻辑在 _respond_stream。"""
         started = time.perf_counter()
@@ -185,7 +192,9 @@ class AgentRuntime:
         with span("agent.run", **{"agent.stream": True}) as current:
             current.set_attribute("tenant.id", current_tenant())
             try:
-                async for event in self._respond_stream(db, conversation, user_content, current):
+                async for event in self._respond_stream(
+                    db, conversation, user_content, current, mode=mode
+                ):
                     if event.get("type") == "completed":
                         outcome = "succeeded"
                     yield event
@@ -201,13 +210,15 @@ class AgentRuntime:
         conversation: Conversation,
         user_content: str,
         current,
+        *,
+        mode: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """逐事件产出，最后落库。
 
         事件：run.started / delta / tool.call / tool.result / completed / error。
         与非流式共用 _start/_finish，保证两条路径的行为不会分叉。
         """
-        state = self._start(db, conversation, user_content)
+        state = self._start(db, conversation, user_content, mode=mode)
         current.set_attribute("agent.id", state.agent.id)
         current.set_attribute("run.id", state.run_id)
         current.set_attribute("model", state.agent.model)
@@ -311,7 +322,14 @@ class AgentRuntime:
     # 共享的准备与收尾
     # ------------------------------------------------------------------
 
-    def _start(self, db: Session, conversation: Conversation, user_content: str) -> _RunState:
+    def _start(
+        self,
+        db: Session,
+        conversation: Conversation,
+        user_content: str,
+        *,
+        mode: str | None = None,
+    ) -> _RunState:
         agent = db.get(Agent, conversation.agent_id)
         if agent is None:
             raise AppError(ErrorCode.NOT_FOUND, "Agent not found", status_code=404)
@@ -330,15 +348,22 @@ class AgentRuntime:
         db.flush()
 
         recorder = RunRecorder(db, run)
+        # 单次请求可临时覆盖；否则用会话上的粘性设置；再否则回落默认值。
+        resolved_mode = normalize_mode(mode or conversation.mode, default=settings.default_conversation_mode)
+
         system_prompt, applied_skills = compose_system_prompt(db, agent)
+        hint = mode_hint(resolved_mode)
+        if hint:
+            system_prompt = f"{system_prompt}\n\n{hint}".strip()
+
         recorder.event(
             "run.started",
             agent_id=agent.id,
             conversation_id=conversation.id,
             model=agent.model,
             skills=applied_skills,
+            mode=resolved_mode,
         )
-
         user_created_at = now_utc()
         user_message = Message(
             conversation_id=conversation.id,
@@ -383,7 +408,13 @@ class AgentRuntime:
             )
 
         # 只把「策略已放行」的工具暴露给模型：模型连看不到的工具都不会去请求。
-        tool_specs = self._available_tool_specs(db, agent_id=agent.id)
+        # ask / plan 模式再收窄到只读工具，被裁掉的工具对模型而言不存在。
+        all_specs = self._available_tool_specs(db, agent_id=agent.id)
+        tool_specs = filter_tool_specs(
+            all_specs,
+            mode=resolved_mode,
+            read_only_names=self._read_only_tool_names(db, agent_id=agent.id),
+        )
         tool_names = [spec["function"]["name"] for spec in tool_specs]
         messages: list[dict[str, Any]] = [
             {"role": m.role, "content": m.content} for m in context.messages
@@ -395,8 +426,10 @@ class AgentRuntime:
             agent_id=agent.id,
             conversation_id=conversation.id,
             model=agent.model,
+            mode=resolved_mode,
             context_messages=len(context.messages),
             available_tools=tool_names,
+            hidden_tools=len(all_specs) - len(tool_specs),
         )
 
         return _RunState(
@@ -499,6 +532,16 @@ class AgentRuntime:
             error_code=outcome.error_code,
         )
         return outcome
+
+    @staticmethod
+    def _read_only_tool_names(db: Session, *, agent_id: str) -> set[str]:
+        """被显式标记为只读、且策略放行的工具名。"""
+        engine = PolicyEngine(db)
+        return {
+            tool.name
+            for tool in ToolRegistry(db).list_enabled()
+            if tool.read_only and engine.evaluate(agent_id=agent_id, tool_name=tool.name).allowed
+        }
 
     @staticmethod
     def _available_tool_specs(db: Session, *, agent_id: str) -> list[dict[str, Any]]:

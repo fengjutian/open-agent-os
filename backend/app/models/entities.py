@@ -48,6 +48,8 @@ class Conversation(TenantScoped):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200), default="New conversation")
+    # ask / plan / craft：控制该会话里模型能看到哪些工具（见 services/conversation_modes.py）
+    mode: Mapped[str] = mapped_column(String(16), default="craft", server_default="craft")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     agent: Mapped[Agent] = relationship(back_populates="conversations")
@@ -208,6 +210,9 @@ class ToolDefinition(TenantScoped):
     # 只允许引用 settings.mcp_servers 里声明过的服务器名，不允许携带命令行。
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 由人显式声明该工具没有副作用。ask / plan 模式下只有 read_only 工具可见
+    # （内建只读工具另见 services/conversation_modes.py 的白名单）。
+    read_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 

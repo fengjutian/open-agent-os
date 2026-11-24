@@ -56,6 +56,8 @@ export const api={
  conversations:(id:string)=>request<Page<Conversation>>(`/agents/${id}/conversations`),
  createConversation:(id:string)=>request<Conversation>(`/agents/${id}/conversations`,{method:"POST",body:JSON.stringify({title:"New conversation"})}),
  messages:(id:string)=>request<Page<Message>>(`/conversations/${id}/messages`),
+ updateConversation:(id:string, patch:{title?:string;mode?:string})=>
+  request<Conversation>(`/conversations/${id}`,{method:"PATCH",body:JSON.stringify(patch)}),
  sendMessage:(id:string,content:string)=>request<SendMessageResponse>(`/conversations/${id}/messages`,{method:"POST",body:JSON.stringify({content})}),
 
  me:()=>request<Me>("/me"),
