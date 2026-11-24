@@ -15,7 +15,7 @@
 | 子代理 | ✅ 已实现 | [subagents.md](subagents.md) | `3d4cd95` |
 | 知识库 RAG | ✅ 已实现 | [knowledge-base.md](knowledge-base.md) | `1c6ad7c` + 本次提交（前端界面） |
 | 用量报表 | ✅ 已实现 | [usage-report.md](usage-report.md) | 本次提交 |
-| 工具结果大 payload 旁路 | 📝 设计稿 | [tool-result-offload.md](tool-result-offload.md) | — |
+| 工具结果大 payload 旁路 | ✅ 已实现 | [tool-result-offload.md](tool-result-offload.md) | 本次提交 |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
 ## 已实现能力（本仓）
@@ -27,6 +27,7 @@
 | 对话 | 会话/消息、会话模式三档 | `api/routes.py`、`services/conversation_modes.py` |
 | Agent | CRUD、技能绑定 | `api/routes.py`、`services/skills.py` |
 | 工具治理 | 注册 → JSON Schema → policy → 审计 → 执行；内建白名单 | `services/tool_gateway.py`、`tool_executor.py` |
+| 大 payload 旁路 | 结果剥离 + `artifact.read` 取回，模型上下文不被撑爆 | `services/tool_offload.py`、`agent_runtime.py` |
 | MCP | stdio 客户端、连接池、串行化、空闲回收 | `services/mcp_client.py`、`mcp_pool.py` |
 | 运行 | 运行记录、事件流、SSE、断线续传 | `api/run_routes.py`、`services/run_stream.py` |
 | 定时任务 | cron 表达式、进程内调度、执行记录 | `services/cron.py`、`cron_scheduler.py`、`api/cron_routes.py` |
@@ -48,7 +49,6 @@
 
 | 批次 | 功能 | 依赖 |
 |---|---|---|
-| B4 | 工具结果大 payload 旁路（已有设计稿） | 无 |
 | B4 | 平台超管与计费 | 模型价格表 |
 
 完整差距清单见 [octop-feature-inventory.md](octop-feature-inventory.md)。

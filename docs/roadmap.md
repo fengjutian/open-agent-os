@@ -25,6 +25,8 @@
 - ✅ 产物收集、SHA-256 校验、索引与下载接口
 - ⏳ 输入文件挂载、网络白名单、执行中流式日志
 - ⏳ Sandbox backend trait（可切换 gVisor / Firecracker）
+- ✅ 工具结果大 payload 旁路（结果剥离 + `artifact.read` 取回，见
+  [features/tool-result-offload.md](features/tool-result-offload.md)）
 
 ## V0.4 Enterprise
 - ⏳ OIDC、组织与多租户、RBAC/ABAC

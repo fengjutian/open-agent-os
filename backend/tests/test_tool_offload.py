@@ -50,8 +50,7 @@ def _last_tool_message(messages):
 def _run_with_big_result(client, agent, monkeypatch):
     """跑一次会产出大结果的运行，返回 (provider 请求记录, invocation_id)。"""
     from app.services import agent_runtime as agent_runtime_module
-    from app.services.model_gateway import ModelReply, StreamDone, ToolCall
-    from app.services.model_gateway import ModelProvider
+    from app.services.model_gateway import ModelProvider, ModelReply, StreamDone, ToolCall
 
     _allow_echo(client, agent)
     conversation = client.post(
@@ -302,13 +301,29 @@ def test_artifact_read_is_tenant_scoped(client, agent, monkeypatch, tenant_key):
 
 
 def test_artifact_read_audit_has_no_result_content(client, agent, monkeypatch):
-    """审计记了 artifact.read，但不记结果内容。"""
+    """审计记了 artifact.read，但不记 invocation_id 的值，也不记结果内容。"""
     _seen, invocation_id = _run_with_big_result(client, agent, monkeypatch)
 
-    logs = client.get("/api/v1/audit-logs", params={"limit": 100}).json()["items"]
-    entries = [entry for entry in logs if entry["resource"] == f"tool:{ARTIFACT_READ_TOOL_NAME}"]
-    # 至少要有 artifact.read 的调用记录（读回动作会留下审计）
-    assert entries or True  # 没有读回动作时为空也算正常
+    # 触发一次 artifact.read 调用（会留下审计）
+    response = client.post(
+        f"/api/v1/agents/{agent['id']}/tools/{ARTIFACT_READ_TOOL_NAME}/invoke",
+        json={"arguments": {"invocation_id": invocation_id, "offset": 0, "limit": 10}},
+    )
+    assert response.json()["status"] == "succeeded", response.text
+
+    logs = client.get("/api/v1/audit-logs", params={"limit": 200}).json()["items"]
+    entries = [
+        entry
+        for entry in logs
+        if entry["resource"] == f"tool:{ARTIFACT_READ_TOOL_NAME}"
+    ]
+    assert entries, "artifact.read 的调用应当留下审计"
+    detail = json.dumps(entries[0]["detail"], ensure_ascii=False)
+    # 只记参数键名
+    assert "argument_keys" in detail
+    # 不记 invocation_id 的值，也不记结果内容
+    assert invocation_id not in detail
+    assert BIG_TEXT[:50] not in detail
 
 
 def test_offload_does_not_change_small_results(client, agent, monkeypatch):

@@ -263,15 +263,17 @@ class AgentRuntime:
                 for call in reply.tool_calls:
                     tool_call_count += 1
                     yield {"type": "tool.call", "tool": call.name, "arguments": call.arguments}
-                    outcome = await self._run_tool(db, state, call, iteration)
+                    outcome, offloaded = await self._run_tool(db, state, call, iteration)
                     yield {
                         "type": "tool.result",
                         "tool": call.name,
                         "status": outcome.status,
                         "error_code": outcome.error_code,
+                        # SSE 保持全量：帧不占上下文预算，调试时也能看到原始结果。
+                        # 旁路只影响「给模型看什么」。
                         "result": outcome.result,
                     }
-                    state.messages.append(self._tool_result_message(call, outcome))
+                    state.messages.append(self._tool_result_message(call, outcome, offloaded))
             else:
                 log_event(
                     logger,

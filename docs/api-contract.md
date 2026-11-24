@@ -289,6 +289,45 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 
 注册工具与写策略需要 `admin`；`developer` 只能调用已被放行的工具。
 
+### 大 payload 旁路（artifact.read）
+
+工具结果超过 `TOOL_RESULT_OFFLOAD_CHARS`（默认 4000）时，**进模型上下文的不再是结果本身**，
+而是一个信封：
+
+```json
+{
+  "status": "succeeded",
+  "result_omitted": true,
+  "artifact": {
+    "invocation_id": "…",
+    "chars": 23110,
+    "sha256": "…",
+    "preview": "前 400 字符…"
+  },
+  "hint": "结果过大已旁路。需要细节时调用 artifact.read(invocation_id, offset, limit)，不要凭 preview 猜测。"
+}
+```
+
+**数据没有丢**：完整结果仍在 `tool_invocations.result` 里，只是没进模型上下文。
+模型用平台内建工具 `artifact.read` 按需取回：
+
+```json
+{ "invocation_id": "…", "offset": 0, "limit": 4000 }
+```
+
+返回 `{ invocation_id, tool_name, offset, limit, total_chars, text, eof }`——
+按字符切片，单次上限同样是 `TOOL_RESULT_OFFLOAD_CHARS`。
+
+要点：
+
+- `artifact.read` 是**平台能力**，不用手工注册（按租户懒注册），在没有策略规则命中时
+  默认放行；显式 deny 仍然生效，管理员也可以把它停用；
+- 跨租户读不到别人的 `invocation_id`（`TenantScoped` 强制过滤），未命中即 `tool_not_found`；
+- `tool_invocations.offloaded` / `result_chars` 两列记录哪些结果被旁路过；
+- **SSE 的 `tool.result` 事件仍带全量结果**——帧不占上下文预算，旁路只影响"给模型看什么"。
+
+详见 [features/tool-result-offload.md](features/tool-result-offload.md)。
+
 ### 隔离执行器（executor）
 
 注册时 `execution_type=executor`，`config` 只允许声明运行时与镜像：
