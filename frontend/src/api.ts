@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchResponse,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -104,6 +104,18 @@ export const api={
   request<CronJob>(`/cron/${id}`,{method:"PATCH",body:JSON.stringify(patch)}),
  deleteCronJob:(id:string)=>request<void>(`/cron/${id}`,{method:"DELETE"}),
  runCronJobNow:(id:string)=>request<CronJob>(`/cron/${id}/run-now`,{method:"POST"}),
+
+ knowledgeBases:()=>request<Page<KnowledgeBase>>("/knowledge-bases"),
+ createKnowledgeBase:(data:{name:string;description?:string})=>
+  request<KnowledgeBase>("/knowledge-bases",{method:"POST",body:JSON.stringify(data)}),
+ deleteKnowledgeBase:(id:string)=>request<void>(`/knowledge-bases/${id}`,{method:"DELETE"}),
+ knowledgeDocuments:(baseId:string)=>request<Page<KnowledgeDocument>>(`/knowledge-bases/${baseId}/documents`),
+ addKnowledgeDocument:(baseId:string,data:{name:string;content:string})=>
+  request<KnowledgeDocument>(`/knowledge-bases/${baseId}/documents`,{method:"POST",body:JSON.stringify(data)}),
+ deleteKnowledgeDocument:(baseId:string,id:string)=>
+  request<void>(`/knowledge-bases/${baseId}/documents/${id}`,{method:"DELETE"}),
+ searchKnowledge:(baseId:string,query:string,limit=4)=>
+  request<KnowledgeSearchResponse>(`/knowledge-bases/${baseId}/search`,{method:"POST",body:JSON.stringify({query,limit})}),
 };
 
 /** 流式回调：服务端按 SSE 事件推送。 */

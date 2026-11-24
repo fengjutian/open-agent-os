@@ -1,9 +1,13 @@
 /* 工具面板与运行面板所需的样式，叠加在 style.css 之上。 */
 
-.nav{display:flex;gap:6px;margin:0 6px 18px}
+/* 导航项会变多（对话/工具/运行/组织/定时/审批/记忆/知识库），
+   允许换行而不是把每个标签压成竖排。 */
+.nav{display:flex;flex-wrap:wrap;gap:6px;margin:0 6px 18px}
 
 .nav button{
- flex:1;
+ flex:1 1 44px;
+ min-width:44px;
+ white-space:nowrap;
  background:transparent;
  border:1px solid #243147;
  color:#8290a5;
@@ -146,3 +150,13 @@
 }
 
 .check{display:flex;align-items:center;gap:6px;font-size:11px;color:#a9bcd6}
+
+/* 知识库：左侧列表项可点选，右侧留一个操作按钮 */
+.base-pick{
+ flex:1;min-width:0;text-align:left;background:transparent;
+ border:1px solid transparent;color:#c4d0e0;padding:4px 6px;border-radius:7px;cursor:pointer;
+}
+.base-pick:hover{color:#e8effa}
+.base-pick.active{background:#1b2b45;border-color:#31496d}
+.base-pick b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.base-pick small{display:block;font-size:10px;margin-top:2px}

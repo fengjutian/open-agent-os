@@ -25,7 +25,7 @@ Agent 只知道自己上下文里的东西。要它回答"我们公司的报销�
 
 ## 3. 向量用的是本地实现（重要）
 
-`local-hash-v1`：中文按字符二元组、英文按词做特征，SHA-256 映射到 256 维并归一化。
+`local-hash-v1`：中文按字符二元组、英文按词做特征，SHA-256 映射到 1024 维并归一化。
 
 **它是词面相似度，不是语义相似度。** "预算超支"能命中"预算管理"，但"报销流程"
 命中不了"费用核销步骤"。这是刻意的取舍——先不引入 embedding 服务依赖，
@@ -70,15 +70,23 @@ Agent 只知道自己上下文里的东西。要它回答"我们公司的报销�
 | DELETE | `/knowledge-bases/{id}/documents/{doc_id}` | 删文档（连带块） |
 | POST | `/knowledge-bases/{id}/search` | 检索，返回 top-k 片段与分数 |
 
-## 6. 边界与已知限制
+## 6. 前端界面
+
+「知识库」视图（侧栏第 8 项）：
+
+- 左侧建库、列出各库（显示块数与向量实现），点选切换；
+- 右侧导入纯文本文档、列出文档与块数、就地检索并展示命中片段与分数；
+- 写操作跟 Agent 同一档权限（`write:agents`），只读角色看到禁用态而不是按钮消失。
+
+## 7. 边界与已知限制
 
 - **只支持纯文本导入**：PDF/OCR/表格解析没有做（Octop 有 `parse.py`/`ocr.py`）；
 - 检索是**全量扫描**，单库超过 `KNOWLEDGE_MAX_SCAN_CHUNKS`（默认 5000）时结果会被截断；
 - 没有引用编号（citations）与来源门控（gate）；
 - 没有后台索引任务队列（导入是同步的，大文档会让请求变慢）；
-- 前端暂无知识库界面，走 API。
+- 前端不提供 Agent 与知识库的绑定关系管理（工具参数里的 `knowledge_base_id` 由调用方给）。
 
-## 7. 实现位置
+## 8. 实现位置
 
 | 关注点 | 位置 |
 |---|---|
@@ -88,10 +96,12 @@ Agent 只知道自己上下文里的东西。要它回答"我们公司的报销�
 | 接口 | `backend/app/api/knowledge_routes.py` |
 | 工具接入 | `backend/app/services/tool_gateway.py`（`knowledge_search` 分支） |
 | 模型 | `KnowledgeBase` / `KnowledgeDocument` / `KnowledgeChunk` |
+| 前端 | `frontend/src/panels.tsx` `KnowledgePanel`、`frontend/src/App.tsx` 的「知识库」视图 |
 
-## 8. 测试
+## 9. 测试
 
 - 切块：长文本被切开且不超长、短文本原样、空文本返回空；
 - 向量：同文本向量一致且归一化、相关文本余弦高于无关文本；
 - API：建库/列表/导入（块数落库）/检索命中/无命中为空/删文档连块/删库/权限/跨租户/404；
-- 工具：`knowledge_search` 经网关执行，检索结果进入 tool 消息；库不存在时返回空结果而不报错。
+- 工具：`knowledge_search` 经网关执行，检索结果进入 tool 消息；库不存在时返回空结果而不报错；
+- 浏览器（`frontend/e2e/smoke.py`）：建库 → 导入文档 → 检索命中，走真实 UI。

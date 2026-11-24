@@ -79,3 +79,23 @@ export interface CronJob {
  schedule:string; enabled:boolean; next_run_at:string; last_run_at:string|null;
  last_status:string|null; last_error:string|null; created_at:string;
 }
+
+/** 知识库：文档集合，检索单位是块（chunk）而不是整篇文档。 */
+export interface KnowledgeBase {
+ id:string; name:string; description:string;
+ embedding_model:string; chunk_count:number; created_at:string;
+}
+
+/** 文档元信息；原文不随列表返回，避免一次拉回全部正文。 */
+export interface KnowledgeDocument {
+ id:string; knowledge_base_id:string; name:string;
+ chunk_count:number; created_at:string;
+}
+
+export interface KnowledgeSearchHit {
+ document:string; seq:number; score:number; text:string;
+}
+
+export interface KnowledgeSearchResponse {
+ hits:KnowledgeSearchHit[]; count:number;
+}

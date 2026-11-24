@@ -149,6 +149,32 @@ def main() -> int:
         assert rows >= 1
         page.screenshot(path=str(shots / "10-memory.png"))
 
+        # ---- 8b. 知识库：建库 → 导入文档 → 检索 ----
+        page.click(".nav button:has-text('知识库')")
+        page.wait_for_timeout(600)
+        page.fill(".sessions .stack input >> nth=0", "运维手册")
+        page.click("button:has-text('创建知识库')")
+        page.wait_for_selector(".base-pick", timeout=10000)
+        page.click(".base-pick >> nth=0")
+        page.wait_for_timeout(500)
+
+        page.fill(".panel-body .stack input >> nth=0", "预算手册")
+        page.fill(
+            ".panel-body .stack textarea",
+            "预算管理的第一条原则是先冻结非必要支出。任何超过五万元的采购都需要财务复核。",
+        )
+        page.click("button:has-text('导入文档')")
+        page.wait_for_selector(".panel-body table.table tbody tr", timeout=10000)
+        print("[ok] 知识库文档数:", page.locator(".panel-body table.table tbody tr").count())
+
+        page.fill(".panel-body .inline-form input", "预算超支了怎么办")
+        page.click(".panel-body button:has-text('搜索')")
+        page.wait_for_selector(".panel-body .feed li", timeout=10000)
+        hit = page.inner_text(".panel-body .feed li")
+        print("[ok] 检索命中:", hit.replace("\n", " ")[:40])
+        assert "预算" in hit, f"检索结果应包含「预算」：{hit}"
+        page.screenshot(path=str(shots / "11-knowledge.png"))
+
         # ---- 9. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})

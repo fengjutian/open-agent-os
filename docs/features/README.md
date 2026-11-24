@@ -13,7 +13,7 @@
 | 上下文压缩（历史摘要） | ✅ 已实现 | [context-summary.md](context-summary.md) | `072c456` |
 | 长期记忆 | ✅ 已实现 | [long-term-memory.md](long-term-memory.md) | `0156a28` |
 | 子代理 | ✅ 已实现 | [subagents.md](subagents.md) | `3d4cd95` |
-| 知识库 RAG | ✅ 已实现 | [knowledge-base.md](knowledge-base.md) | 本次提交 |
+| 知识库 RAG | ✅ 已实现 | [knowledge-base.md](knowledge-base.md) | `1c6ad7c` + 本次提交（前端界面） |
 | 工具结果大 payload 旁路 | 📝 设计稿 | [tool-result-offload.md](tool-result-offload.md) | — |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
@@ -33,14 +33,14 @@
 | 上下文压缩 | 历史摘要替代整条丢弃、增量摘要 | `services/summarizer.py`、`agent_runtime.py`、`context.py` |
 | 长期记忆 | 词法召回、按需注入、会话提炼 | `services/memory.py`、`api/memory_routes.py` |
 | 子代理 | 派生完整子运行、深度上限、结果回灌 | `services/subagents.py`、`tool_gateway.py` |
-| 知识库 | 切块、向量化、词面门控检索、工具接入 | `services/knowledge.py`、`embeddings.py`、`api/knowledge_routes.py` |
+| 知识库 | 切块、向量化、词面门控检索、工具接入、前端界面 | `services/knowledge.py`、`embeddings.py`、`api/knowledge_routes.py`、`frontend/src/panels.tsx` |
 | 认证 | API Key、OIDC/JWT、三角色 RBAC | `services/api_keys.py`、`core/security.py` |
 | 多租户 | 数据层强制隔离、组织与成员、成员覆盖 IdP 角色 | `db/tenancy.py`、`services/tenants.py` |
 | 限流 | 每分钟限流、日配额（内存 / Redis） | `services/rate_limit.py` |
 | 审计 | 只追加 + 哈希链 | `services/audit_chain.py` |
 | 可观测 | OpenTelemetry trace/metrics/log 关联 | `core/telemetry.py` |
 | 评测 | 评测 runner 与套件 | `evals/` |
-| 前端 | 四视图、模式切换、窄屏适配 | `frontend/src/` |
+| 前端 | 八视图、模式切换、窄屏适配 | `frontend/src/` |
 
 ## 待办（按不依赖外部服务优先）
 

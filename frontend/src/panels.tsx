@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,Approval,AuditLog,CronJob,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchHit,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -652,6 +652,184 @@ export function MemoryPanel({agents,onError}:{agents:Agent[];onError:(err:unknow
           </tbody>
         </table>
         {!items.length && <p className="muted">{loading ? "加载中…" : "还没有记忆。"}</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+export function KnowledgePanel({me,onError}:{me:Me|null;onError:(err:unknown)=>void}) {
+  const [bases,setBases]=useState<KnowledgeBase[]>([]);
+  const [selectedId,setSelectedId]=useState("");
+  const [documents,setDocuments]=useState<KnowledgeDocument[]>([]);
+  const [hits,setHits]=useState<KnowledgeSearchHit[]>([]);
+  const [baseName,setBaseName]=useState("");
+  const [baseDescription,setBaseDescription]=useState("");
+  const [documentName,setDocumentName]=useState("");
+  const [documentContent,setDocumentContent]=useState("");
+  const [query,setQuery]=useState("");
+  const [searched,setSearched]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+
+  // 知识库的写权限与 Agent 同一档（后端用 write:agents 校验）
+  const canWrite = me?.permissions.includes("write:agents") ?? false;
+  const selected = bases.find(item=>item.id===selectedId) ?? null;
+
+  const reloadBases = useCallback(async () => {
+    try { setBases((await api.knowledgeBases()).items); }
+    catch(err) { onError(err); }
+    finally { setLoading(false); }
+  },[onError]);
+
+  const reloadDocuments = useCallback(async (baseId:string) => {
+    if(!baseId) { setDocuments([]); return; }
+    try { setDocuments((await api.knowledgeDocuments(baseId)).items); }
+    catch(err) { onError(err); }
+  },[onError]);
+
+  useEffect(()=>{ reloadBases(); },[reloadBases]);
+  useEffect(()=>{ reloadDocuments(selectedId); setHits([]); setSearched(false); },[selectedId,reloadDocuments]);
+
+  async function createBase(event:React.FormEvent) {
+    event.preventDefault();
+    if(!baseName.trim()) return;
+    setBusy(true);
+    try {
+      const created = await api.createKnowledgeBase({name:baseName.trim(), description:baseDescription.trim()});
+      setBaseName(""); setBaseDescription("");
+      await reloadBases();
+      setSelectedId(created.id);
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function removeBase(base:KnowledgeBase) {
+    setBusy(true);
+    try {
+      await api.deleteKnowledgeBase(base.id);
+      if(selectedId===base.id) setSelectedId("");
+      await reloadBases();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function addDocument(event:React.FormEvent) {
+    event.preventDefault();
+    if(!selectedId || !documentName.trim() || !documentContent.trim()) return;
+    setBusy(true);
+    try {
+      await api.addKnowledgeDocument(selectedId, {name:documentName.trim(), content:documentContent});
+      setDocumentName(""); setDocumentContent("");
+      await reloadDocuments(selectedId);
+      await reloadBases();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function removeDocument(document:KnowledgeDocument) {
+    setBusy(true);
+    try {
+      await api.deleteKnowledgeDocument(selectedId, document.id);
+      await reloadDocuments(selectedId);
+      await reloadBases();
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function runSearch(event:React.FormEvent) {
+    event.preventDefault();
+    if(!selectedId || !query.trim()) return;
+    setBusy(true);
+    try {
+      const result = await api.searchKnowledge(selectedId, query.trim());
+      setHits(result.hits);
+      setSearched(true);
+    } catch(err) { onError(err); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>新建知识库</h3>
+      {canWrite
+        ? <form className="stack" onSubmit={createBase}>
+            <input className="field" value={baseName} onChange={e=>setBaseName(e.target.value)}
+              placeholder="知识库名称，例如 运维手册" />
+            <input className="field" value={baseDescription} onChange={e=>setBaseDescription(e.target.value)}
+              placeholder="描述（可选）" />
+            <button className="primary" type="submit" disabled={busy || !baseName.trim()}>创建知识库</button>
+          </form>
+        : <p className="muted">当前角色只读，创建知识库需要 developer。</p>}
+
+      <h3>知识库</h3>
+      {bases.map(base=><div key={base.id} className="row">
+        <button className={`base-pick ${selectedId===base.id?"active":""}`} onClick={()=>setSelectedId(base.id)}>
+          <b>{base.name}</b>
+          <small className="muted">{base.chunk_count} 块 · {base.embedding_model}</small>
+        </button>
+        <button className="ghost" disabled={!canWrite || busy} onClick={()=>removeBase(base)}>删除</button>
+      </div>)}
+      {!bases.length && <p className="muted">{loading ? "加载中…" : "还没有知识库。"}</p>}
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>{selected ? selected.name : "选择知识库"}</b>
+          <small>检索单位是块（chunk），不是整篇文档</small>
+        </div>
+        <span>● {me?.role ?? "?"}</span>
+      </div>
+      <div className="panel-body">
+        {selected
+          ? <>
+            <h3>导入文档</h3>
+            {canWrite
+              ? <form className="stack" onSubmit={addDocument}>
+                  <input className="field" value={documentName} onChange={e=>setDocumentName(e.target.value)}
+                    placeholder="文档名称" />
+                  <textarea className="field" rows={6} value={documentContent} onChange={e=>setDocumentContent(e.target.value)}
+                    placeholder="粘贴纯文本内容，服务端自动切块并向量化" />
+                  <button className="primary" type="submit" disabled={busy || !documentName.trim() || !documentContent.trim()}>
+                    导入文档
+                  </button>
+                </form>
+              : <p className="muted">当前角色只读，导入文档需要 developer。</p>}
+
+            <h3>文档</h3>
+            <table className="table">
+              <thead><tr><th>名称</th><th>块数</th><th>时间</th><th></th></tr></thead>
+              <tbody>
+                {documents.map(item=><tr key={item.id}>
+                  <td>{item.name}</td>
+                  <td className="muted small">{item.chunk_count}</td>
+                  <td className="muted small">{time(item.created_at)}</td>
+                  <td className="actions">
+                    <button className="ghost" disabled={!canWrite || busy} onClick={()=>removeDocument(item)}>删除</button>
+                  </td>
+                </tr>)}
+              </tbody>
+            </table>
+            {!documents.length && <p className="muted">{loading ? "加载中…" : "该知识库还没有文档。"}</p>}
+
+            <h3>检索</h3>
+            <form className="inline-form" onSubmit={runSearch}>
+              <input className="field" value={query} onChange={e=>setQuery(e.target.value)}
+                placeholder="例如 预算超支怎么办" />
+              <button className="ghost" type="submit" disabled={busy || !query.trim()}>搜索</button>
+            </form>
+            <small className="muted">
+              默认按词面覆盖率排序（服务端可切余弦）；命中要求至少共享一个词面特征，同义改写不一定命中。
+            </small>
+
+            {hits.length>0 && <ul className="feed">
+              {hits.map((hit,index)=><li key={`${hit.document}-${hit.seq}-${index}`}>
+                <code>{hit.document} #{hit.seq}</code> <span className="muted small">score {hit.score}</span>
+                <pre className="payload">{hit.text}</pre>
+              </li>)}
+            </ul>}
+            {searched && !hits.length && <p className="muted">没有命中任何块。</p>}
+          </>
+          : <p className="muted">从左侧选择一个知识库，导入文档并检索。</p>}
       </div>
     </section>
   </div>;
