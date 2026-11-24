@@ -28,6 +28,7 @@ from app.services.approvals import APPROVAL_PENDING
 from app.services.artifacts import ArtifactStore
 from app.services.audit import AuditService, agent_actor
 from app.services.policy import PolicyEngine
+from app.services.subagents import SPAWN_TOOL_NAME, run_subagent
 from app.services.tool_executor import execute_tool
 from app.services.tool_registry import ToolRegistry
 
@@ -189,13 +190,19 @@ class ToolGateway:
 
         # ---- 第 5 步：执行 ----
         try:
-            result = await execute_tool(
-                tool,
-                arguments,
-                invocation_id=invocation.id,
-                run_id=run_id,
-                artifact_store=ArtifactStore(self._db),
-            )
+            if tool.execution_type == "builtin" and tool.name == SPAWN_TOOL_NAME:
+                # 子代理不是普通工具实现：它要派生一次完整运行（自己的会话与 Run）
+                result = await run_subagent(
+                    self._db, arguments=arguments, parent_run_id=run_id
+                )
+            else:
+                result = await execute_tool(
+                    tool,
+                    arguments,
+                    invocation_id=invocation.id,
+                    run_id=run_id,
+                    artifact_store=ArtifactStore(self._db),
+                )
         except AppError as exc:
             invocation.status = STATUS_FAILED
             invocation.error_code = exc.code

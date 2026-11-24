@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     memory_min_score: float = 0.12
     # 单个会话最多提炼多少条记忆
     memory_distill_limit: int = 5
+    # 子代理：允许的最大嵌套层数（A 派 B 为 1 层）
+    subagent_max_depth: int = 2
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）
     default_conversation_mode: str = "craft"
     # 定时任务：是否启动后台调度循环，以及轮询间隔（秒）
