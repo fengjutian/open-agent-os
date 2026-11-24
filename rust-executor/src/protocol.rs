@@ -32,6 +32,12 @@ const MIN_OUTPUT_BYTES: usize = 1024;
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_ARTIFACTS: usize = 100;
+/// 单次执行最多挂载多少个输入文件。
+const MAX_INPUTS: usize = 16;
+/// 输入目标路径的长度上限。
+const MAX_INPUT_TARGET: usize = 200;
+/// 产物目录名（执行器从 `<workspace>/output` 收集产物）。
+const OUTPUT_DIR_NAME: &str = "output";
 
 pub const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
 pub const DEFAULT_MEMORY_MB: u32 = 512;
@@ -88,6 +94,20 @@ pub struct ExecutionRequest {
     /// 容器内运行的用户（`uid:gid`）。缺省按平台选择，见 `default_user`。
     #[serde(default)]
     pub user: Option<String>,
+    /// 只读挂载的输入文件。来源路径由 Python 侧校验（只能是本租户登记过的产物），
+    /// 这里再校验一次目标路径与来源文件，避免把任意宿主机路径挂进容器。
+    #[serde(default)]
+    pub inputs: Vec<InputMount>,
+}
+
+/// 一个只读输入挂载：宿主机文件 → 容器内 `/workspace` 下的相对路径。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputMount {
+    /// 宿主机上的文件路径（绝对路径）。
+    pub source: String,
+    /// 容器内目标路径，相对 `/workspace`，例如 `input/data.csv`。
+    pub target: String,
 }
 
 /// 通过校验、可以直接交给 Docker 后端的执行计划。
@@ -105,6 +125,7 @@ pub struct Job {
     pub max_artifact_bytes: u64,
     pub max_artifacts: usize,
     pub user: String,
+    pub inputs: Vec<InputMount>,
 }
 
 impl ExecutionRequest {
@@ -142,6 +163,8 @@ impl ExecutionRequest {
             None => default_user(),
         };
 
+        let inputs = check_inputs(&self.inputs)?;
+
         Ok(Job {
             tool: self.tool,
             image: self.image,
@@ -172,8 +195,63 @@ impl ExecutionRequest {
                 .min(MAX_ARTIFACT_BYTES),
             max_artifacts: self.max_artifacts.unwrap_or(DEFAULT_ARTIFACTS).min(MAX_ARTIFACTS),
             user,
+            inputs,
         })
     }
+}
+
+/// 输入挂载的目标路径必须是 `/workspace` 下的安全相对路径。
+fn check_input_target(target: &str) -> Result<String, ProtocolError> {
+    if target.is_empty() || target.len() > MAX_INPUT_TARGET {
+        return Err(ProtocolError::new("输入目标路径为空或过长"));
+    }
+    if target.starts_with('/') || target.contains('\\') {
+        return Err(ProtocolError::new(
+            "输入目标路径必须是 /workspace 下的相对 POSIX 路径",
+        ));
+    }
+    if target.contains(':') {
+        return Err(ProtocolError::new("输入目标路径不能包含盘符"));
+    }
+    for part in target.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return Err(ProtocolError::new("输入目标路径含有非法片段"));
+        }
+    }
+    // 产物目录是执行器收集产物的地方，不允许被输入挂载遮住
+    if target.split('/').next() == Some(OUTPUT_DIR_NAME) {
+        return Err(ProtocolError::new("输入目标路径不能位于产物目录内"));
+    }
+    Ok(target.to_string())
+}
+
+/// 校验输入挂载：目标路径安全、来源是已存在的普通文件、目标不重复。
+fn check_inputs(inputs: &[InputMount]) -> Result<Vec<InputMount>, ProtocolError> {
+    if inputs.len() > MAX_INPUTS {
+        return Err(ProtocolError::new(format!(
+            "输入挂载过多（最多 {MAX_INPUTS} 个）"
+        )));
+    }
+    let mut seen: Vec<String> = Vec::new();
+    let mut checked: Vec<InputMount> = Vec::new();
+    for item in inputs {
+        let target = check_input_target(&item.target)?;
+        // 用 symlink_metadata：符号链接本身就不是普通文件，直接拒掉
+        let meta = std::fs::symlink_metadata(&item.source)
+            .map_err(|err| ProtocolError::new(format!("输入文件不可用: {err}")))?;
+        if !meta.file_type().is_file() {
+            return Err(ProtocolError::new("输入来源不是普通文件"));
+        }
+        if seen.iter().any(|value| value == &target) {
+            return Err(ProtocolError::new("输入挂载的目标路径重复"));
+        }
+        seen.push(target.clone());
+        checked.push(InputMount {
+            source: item.source.clone(),
+            target,
+        });
+    }
+    Ok(checked)
 }
 
 fn clamp_f64(value: Option<f64>, default: f64, min: f64, max: f64) -> f64 {

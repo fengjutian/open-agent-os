@@ -13,9 +13,9 @@
 | 上下文压缩（历史摘要） | ✅ 已实现 | [context-summary.md](context-summary.md) | `072c456` |
 | 长期记忆 | ✅ 已实现 | [long-term-memory.md](long-term-memory.md) | `0156a28` |
 | 子代理 | ✅ 已实现 | [subagents.md](subagents.md) | `3d4cd95` |
-| 知识库 RAG | ✅ 已实现 | [knowledge-base.md](knowledge-base.md) | `1c6ad7c` + 本次提交（前端界面） |
-| 用量报表 | ✅ 已实现 | [usage-report.md](usage-report.md) | 本次提交 |
-| 工具结果大 payload 旁路 | ✅ 已实现 | [tool-result-offload.md](tool-result-offload.md) | 本次提交 |
+| 知识库 RAG | ✅ 已实现 | [knowledge-base.md](knowledge-base.md) | `1c6ad7c` + `981d1f8`（前端界面） |
+| 用量报表 | ✅ 已实现 | [usage-report.md](usage-report.md) | `6da4f8a` |
+| 工具结果大 payload 旁路 | ✅ 已实现 | [tool-result-offload.md](tool-result-offload.md) | `f078685` + `b0788b2` |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
 ## 已实现能力（本仓）

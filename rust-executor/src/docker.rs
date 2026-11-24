@@ -132,10 +132,22 @@ pub fn build_args(job: &Job, name: &str) -> Vec<String> {
         "agent-executor=1".into(),
         "-v".into(),
         format!("{}:/workspace:rw", mount_path(&job.workspace)),
-        "-w".into(),
-        "/workspace".into(),
-        job.image.clone(),
     ];
+    // 输入文件以**只读**方式挂到 /workspace 下。放在 workspace 挂载之后，
+    // 更具体的路径才会覆盖同名路径（Docker 按出现顺序处理挂载）。
+    for item in &job.inputs {
+        args.push("-v".into());
+        args.push(format!(
+            "{}:/workspace/{}:ro",
+            mount_path(Path::new(&item.source)),
+            item.target
+        ));
+    }
+    args.extend([
+        "-w".to_string(),
+        "/workspace".to_string(),
+        job.image.clone(),
+    ]);
     args.extend(job.argv.iter().cloned());
     args
 }
@@ -343,7 +355,7 @@ pub fn docker_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Job;
+    use crate::protocol::{InputMount, Job};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -361,6 +373,7 @@ mod tests {
             max_artifact_bytes: 5 * 1024 * 1024,
             max_artifacts: 20,
             user: "65534:65534".to_string(),
+            inputs: Vec::new(),
         }
     }
 
@@ -402,8 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn mount_path_normalizes_windows_paths() {
-        assert_eq!(
+    fn mount_path_normalizes_windows_paths() {        assert_eq!(
             mount_path(Path::new(r"C:\Users\dev\workspace")),
             "C:/Users/dev/workspace"
         );
