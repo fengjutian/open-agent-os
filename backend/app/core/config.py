@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     memory_min_score: float = 0.12
     # 单个会话最多提炼多少条记忆
     memory_distill_limit: int = 5
+    # 知识库：切块大小、重叠、默认召回条数与单次扫描上限
+    knowledge_chunk_size: int = 800
+    knowledge_chunk_overlap: int = 100
+    knowledge_top_k: int = 4
+    knowledge_max_scan_chunks: int = 5000
+    # lexical：词面覆盖率（默认，可用本地向量时更准）；vector：余弦相似度
+    knowledge_ranking: str = "lexical"
     # 子代理：允许的最大嵌套层数（A 派 B 为 1 层）
     subagent_max_depth: int = 2
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）

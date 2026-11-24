@@ -269,6 +269,53 @@ class ToolInvocationRead(BaseModel):
     finished_at: UtcDatetime | None
 
 
+class KnowledgeBaseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+
+
+class KnowledgeBaseRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    description: str
+    embedding_model: str
+    chunk_count: int
+    created_at: UtcDatetime
+
+
+class KnowledgeDocumentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    # 先只支持纯文本导入；文件解析（PDF/OCR）是后续的事
+    content: str = Field(min_length=1, max_length=500_000)
+
+
+class KnowledgeDocumentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    knowledge_base_id: str
+    name: str
+    chunk_count: int
+    created_at: UtcDatetime
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(default=4, ge=1, le=20)
+
+
+class KnowledgeSearchHit(BaseModel):
+    document: str
+    seq: int
+    score: float
+    text: str
+
+
+class KnowledgeSearchResponse(BaseModel):
+    hits: list[KnowledgeSearchHit]
+    count: int
+
+
 class MemoryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
     # 为空表示租户级记忆（所有 Agent 可见）

@@ -41,6 +41,21 @@ Authorization: Bearer oak_xxxxxxxx
 没有成员的 OIDC 用户一律 403。为不存在的租户签发密钥返回 404；
 租户 `status=disabled` 后该租户的所有请求 403。
 
+### 知识库
+
+- `POST /knowledge-bases`：建库，body `{ name, description? }`。
+- `GET /knowledge-bases`：列表，含 `chunk_count` 与 `embedding_model`。
+- `DELETE /knowledge-bases/{id}`：删库，连带文档与块，204。
+- `POST /knowledge-bases/{id}/documents`：导入纯文本文档，body `{ name, content }`；
+  同步切块并向量化，返回 `chunk_count`。
+- `GET /knowledge-bases/{id}/documents`：文档列表。
+- `DELETE /knowledge-bases/{id}/documents/{doc_id}`：删文档并清块，204。
+- `POST /knowledge-bases/{id}/search`：检索，body `{ query, limit? }`，
+  返回 `{ hits: [{ document, seq, score, text }], count }`。
+
+检索默认按**词面覆盖率**排序（`KNOWLEDGE_RANKING=vector` 可切余弦），
+且要求查询与块至少共享一个词面特征——本地哈希向量在短文本上的随机相似度足以
+把无关内容排进结果，门控是必需的。模型侧通过内置工具 `knowledge_search` 使用。
 ### 长期记忆
 
 - `POST /memories`：写入一条记忆，body `{ content, agent_id?, tags?, source_conversation_id? }`；

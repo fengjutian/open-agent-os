@@ -10,6 +10,7 @@ from app.api.approval_routes import router as approval_router
 from app.api.auth_routes import router as auth_router
 from app.api.cron_routes import router as cron_router
 from app.api.error_handlers import register_exception_handlers
+from app.api.knowledge_routes import router as knowledge_router
 from app.api.memory_routes import router as memory_router
 from app.api.middleware import RequestContextMiddleware
 from app.api.routes import router
@@ -108,6 +109,7 @@ app.include_router(tenant_router)
 app.include_router(cron_router)
 app.include_router(approval_router)
 app.include_router(memory_router)
+app.include_router(knowledge_router)
 
 
 @app.get("/health")

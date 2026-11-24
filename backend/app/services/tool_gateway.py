@@ -27,6 +27,7 @@ from app.models.entities import ToolApproval, ToolInvocation, now_utc
 from app.services.approvals import APPROVAL_PENDING
 from app.services.artifacts import ArtifactStore
 from app.services.audit import AuditService, agent_actor
+from app.services.knowledge import KNOWLEDGE_TOOL_NAME
 from app.services.policy import PolicyEngine
 from app.services.subagents import SPAWN_TOOL_NAME, run_subagent
 from app.services.tool_executor import execute_tool
@@ -190,7 +191,20 @@ class ToolGateway:
 
         # ---- 第 5 步：执行 ----
         try:
-            if tool.execution_type == "builtin" and tool.name == SPAWN_TOOL_NAME:
+            if tool.execution_type == "builtin" and tool.name == KNOWLEDGE_TOOL_NAME:
+                # 知识库检索要读 DB，和子代理一样走网关分支
+                from app.services.knowledge import search_chunks
+
+                base_id = str(arguments.get("knowledge_base_id") or "")
+                query = str(arguments.get("query") or "")
+                hits = search_chunks(
+                    self._db, knowledge_base_id=base_id, query=query
+                )
+                result = {
+                    "count": len(hits),
+                    "hits": [hit.to_dict() for hit in hits],
+                }
+            elif tool.execution_type == "builtin" and tool.name == SPAWN_TOOL_NAME:
                 # 子代理不是普通工具实现：它要派生一次完整运行（自己的会话与 Run）
                 result = await run_subagent(
                     self._db, arguments=arguments, parent_run_id=run_id

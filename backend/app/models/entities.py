@@ -60,6 +60,51 @@ class Conversation(TenantScoped):
         back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
+class KnowledgeBase(TenantScoped):
+    """知识库：一组文档，按各自的分块做检索。"""
+
+    __tablename__ = "knowledge_bases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    # 记录了建库时用的向量实现：换实现必须重建索引，否则维度对不上
+    embedding_model: Mapped[str] = mapped_column(String(60), default="local-hash-v1")
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class KnowledgeDocument(TenantScoped):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    knowledge_base_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class KnowledgeChunk(TenantScoped):
+    """检索单元。embedding 以 JSON 数组存，维度由建库时的实现决定。"""
+
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    knowledge_base_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class Memory(TenantScoped):
     """长期记忆：跨会话保留的事实、偏好与约定。
 
