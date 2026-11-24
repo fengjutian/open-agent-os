@@ -17,7 +17,7 @@
 | 用量报表 | ✅ 已实现 | [usage-report.md](usage-report.md) | `6da4f8a` |
 | 工具结果大 payload 旁路 | ✅ 已实现 | [tool-result-offload.md](tool-result-offload.md) | `f078685` + `b0788b2` |
 | 执行器输入文件挂载 | ✅ 已实现 | [executor-input-mounts.md](executor-input-mounts.md) | `2b21efb` + `8869264` |
-| 产物中心 | ✅ 已实现 | [artifact-center.md](artifact-center.md) | 本次提交 |
+| 产物中心 | ✅ 已实现 | [artifact-center.md](artifact-center.md) | `a05a5bf` |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
 ## 已实现能力（本仓）
