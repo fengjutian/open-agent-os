@@ -57,6 +57,36 @@ class Conversation(TenantScoped):
         back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
+class CronJob(TenantScoped):
+    """定时任务：按 cron 表达式周期性让某个 Agent 跑一次提示词。
+
+    `next_run_at` 是**预先算好**的下次触发时间：调度器先把命中任务的
+    next_run_at 推进并提交，再去执行，避免同一条任务在一次 tick 里被重复触发。
+    """
+
+    __tablename__ = "cron_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    # 为空时每次执行新建会话，避免长期堆在一个会话里
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(120), default="scheduled job")
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    # 标准 5 段 cron（分 时 日 月 周），UTC 解释
+    schedule: Mapped[str] = mapped_column(String(120), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
 class Message(TenantScoped):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))

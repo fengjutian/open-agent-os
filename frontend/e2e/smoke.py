@@ -85,7 +85,18 @@ def main() -> int:
             page.screenshot(path=str(shots / f"{name}.png"))
             print(f"[ok] 视图 {label}: 标题 =", page.inner_text("header h1"))
 
-        # ---- 6. 窄屏 / 手机宽度 ----
+        # ---- 6. 定时任务 ----
+        page.click(".nav button:has-text('定时')")
+        page.wait_for_timeout(500)
+        page.fill(".stack input >> nth=1", "0 9 * * *")
+        page.click("button:has-text('创建任务')")
+        page.wait_for_selector("table.table tbody tr", timeout=10000)
+        rows = page.locator("table.table tbody tr").count()
+        print("[ok] 创建定时任务，列表行数:", rows)
+        page.screenshot(path=str(shots / "08-cron.png"))
+        assert page.inner_text("table.table tbody tr >> nth=0").find("0 9 * * *") >= 0
+
+        # ---- 7. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})
         page.wait_for_timeout(500)

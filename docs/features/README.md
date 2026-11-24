@@ -8,6 +8,7 @@
 | 功能 | 状态 | 文档 | 提交 |
 |---|---|---|---|
 | 会话模式 Ask / Plan / Craft | ✅ 已实现 | [conversation-modes.md](conversation-modes.md) | `68287ff` |
+| 定时任务 cron | ✅ 已实现 | [cron.md](cron.md) | 本次提交 |
 | 工具结果大 payload 旁路 | 📝 设计稿 | [tool-result-offload.md](tool-result-offload.md) | — |
 | Octop 功能全景（对齐基线） | 📚 参考 | [octop-feature-inventory.md](octop-feature-inventory.md) | `414db2d` |
 
@@ -22,6 +23,7 @@
 | 工具治理 | 注册 → JSON Schema → policy → 审计 → 执行；内建白名单 | `services/tool_gateway.py`、`tool_executor.py` |
 | MCP | stdio 客户端、连接池、串行化、空闲回收 | `services/mcp_client.py`、`mcp_pool.py` |
 | 运行 | 运行记录、事件流、SSE、断线续传 | `api/run_routes.py`、`services/run_stream.py` |
+| 定时任务 | cron 表达式、进程内调度、执行记录 | `services/cron.py`、`cron_scheduler.py`、`api/cron_routes.py` |
 | 认证 | API Key、OIDC/JWT、三角色 RBAC | `services/api_keys.py`、`core/security.py` |
 | 多租户 | 数据层强制隔离、组织与成员、成员覆盖 IdP 角色 | `db/tenancy.py`、`services/tenants.py` |
 | 限流 | 每分钟限流、日配额（内存 / Redis） | `services/rate_limit.py` |
@@ -35,7 +37,6 @@
 | 批次 | 功能 | 依赖 |
 |---|---|---|
 | B1 | HITL 人工审批（挂起 → 批准/拒绝 → 继续） | 无 |
-| B1 | 定时任务 cron（模型 + 进程内调度 + API + 前端） | 无 |
 | B2 | 上下文压缩（摘要替代整条丢弃） | 模型调用 |
 | B2 | 长期记忆（摘要 + 检索） | 无 |
 | B2 | 子代理（派生运行） | 无 |

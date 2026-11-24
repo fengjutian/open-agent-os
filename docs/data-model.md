@@ -28,6 +28,8 @@
 
 ## V0.2 运行时
 - Run：id（即 run_id）、agent_id、conversation_id、key_id、status、model、iterations、tool_calls、prompt_chars、answer_chars、error_code、error_message、started_at、finished_at。
+- CronJob：id、agent_id、conversation_id（可空，为空时首次执行新建会话）、name、prompt、
+  schedule（5 段 cron，UTC）、enabled、next_run_at、last_run_at、last_status、last_error、created_at、updated_at。
 - RunEvent：id、run_id、seq、type、payload（JSON）、created_at。追加写，不改。
 
 `seq` 在单次运行内严格递增，便于还原执行顺序。事件类型：

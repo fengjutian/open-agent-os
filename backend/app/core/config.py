@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     mcp_idle_seconds: float = 60.0
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）
     default_conversation_mode: str = "craft"
+    # 定时任务：是否启动后台调度循环，以及轮询间隔（秒）
+    cron_enabled: bool = True
+    cron_tick_seconds: float = 30.0
+    # 单次调度最多补跑多少个错过的任务（防止停机很久后一次性刷屏）
+    cron_max_due_per_tick: int = 20
     # 回放已落库事件时的轮询间隔（秒）
     run_stream_poll_seconds: float = 0.2
     # 回放端点最长跟随多久（秒）；超时后以 stream.end(reason=timeout) 收尾

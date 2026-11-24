@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -5,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth_routes import router as auth_router
+from app.api.cron_routes import router as cron_router
 from app.api.error_handlers import register_exception_handlers
 from app.api.middleware import RequestContextMiddleware
 from app.api.routes import router
@@ -19,6 +22,7 @@ from app.db.migrate import run_migrations
 from app.db.session import SessionLocal
 from app.models import entities  # noqa: F401  注册 SQLAlchemy 模型
 from app.services.api_keys import ApiKeyService
+from app.services.cron_scheduler import scheduler_loop
 from app.services.mcp_pool import get_mcp_pool
 from app.services.run_stream import get_run_hub
 from app.services.tenants import bootstrap_default_tenant
@@ -64,7 +68,19 @@ async def lifespan(app: FastAPI):
     # 原先是 Base.metadata.create_all；现在 schema 由 Alembic 迁移唯一负责。
     run_migrations()
     bootstrap_admin_key()
+
+    # 定时任务调度：进程内轮询。多实例部署需要外部分布式锁，这里不假装支持。
+    scheduler_task: asyncio.Task | None = None
+    if settings.cron_enabled:
+        scheduler_task = asyncio.create_task(scheduler_loop())
+
     yield
+
+    if scheduler_task is not None:
+        scheduler_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await scheduler_task
+
     # 取消在途运行（避免留下半截任务），再回收 MCP 子进程
     await get_run_hub().close_all()
     await get_mcp_pool().close_all()
@@ -87,6 +103,7 @@ app.include_router(auth_router)
 app.include_router(run_router)
 app.include_router(skill_router)
 app.include_router(tenant_router)
+app.include_router(cron_router)
 
 
 @app.get("/health")

@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,AuditLog,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,AuditLog,CronJob,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -402,6 +402,112 @@ export function OrganizationPanel({me,onError}:{me:Me|null;onError:(err:unknown)
           </tbody>
         </table>
         {!members.length && <p className="muted">{loading ? "加载中…" : "该租户还没有成员。"}</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+export function CronPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)=>void}) {
+  const [agentId,setAgentId]=useState(agents[0]?.id ?? "");
+  const [jobs,setJobs]=useState<CronJob[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [name,setName]=useState("每日汇报");
+  const [prompt,setPrompt]=useState("用三句话总结今天的进展。");
+  const [schedule,setSchedule]=useState("0 9 * * *");
+
+  useEffect(()=>{ if(!agentId&&agents[0]) setAgentId(agents[0].id); },[agentId,agents]);
+
+  const reload = useCallback(async () => {
+    if(!agentId) return;
+    try { setJobs((await api.cronJobs(agentId)).items); }
+    catch(err) { onError(err); }
+    finally { setLoading(false); }
+  },[agentId,onError]);
+
+  useEffect(()=>{ reload(); },[reload]);
+
+  async function create(event:React.FormEvent){
+    event.preventDefault();
+    if(!agentId||!prompt.trim()||!schedule.trim()) return;
+    setBusy(true);
+    try{
+      await api.createCronJob(agentId,{name:name.trim()||"scheduled job",prompt:prompt.trim(),schedule:schedule.trim()});
+      await reload();
+    }catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  async function toggle(job:CronJob){
+    setBusy(true);
+    try{ await api.updateCronJob(job.id,{enabled:!job.enabled}); await reload(); }
+    catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  async function runNow(job:CronJob){
+    setBusy(true);
+    try{ await api.runCronJobNow(job.id); await reload(); }
+    catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  async function remove(job:CronJob){
+    setBusy(true);
+    try{ await api.deleteCronJob(job.id); await reload(); }
+    catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>新建定时任务</h3>
+      <form className="stack" onSubmit={create}>
+        <select className="field" value={agentId} onChange={e=>setAgentId(e.target.value)}>
+          {agents.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <input className="field" value={name} onChange={e=>setName(e.target.value)} placeholder="任务名称" />
+        <input className="field" value={schedule} onChange={e=>setSchedule(e.target.value)}
+          placeholder="cron 表达式，例如 0 9 * * *" />
+        <textarea className="field" rows={3} value={prompt} onChange={e=>setPrompt(e.target.value)}
+          placeholder="每次执行时发给 Agent 的提示词" />
+        <small className="muted">5 段 cron（分 时 日 月 周），按 UTC 解释；也支持 @daily / @hourly。</small>
+        <button className="primary" type="submit" disabled={busy || !prompt.trim() || !schedule.trim()}>
+          创建任务
+        </button>
+      </form>
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>定时任务</b><small>由服务端调度循环触发，进程停止则不会执行</small></div>
+      </div>
+      <div className="panel-body">
+        <table className="table">
+          <thead>
+            <tr><th>名称</th><th>表达式</th><th>下次执行</th><th>上次状态</th><th></th></tr>
+          </thead>
+          <tbody>
+            {jobs.map(job=><tr key={job.id}>
+              <td>{job.name}</td>
+              <td><code>{job.schedule}</code></td>
+              <td className="muted small">{time(job.next_run_at)}</td>
+              <td>
+                <span className={job.last_status==="succeeded"?"ok":job.last_status?"no":""}>
+                  {job.last_status ?? "未执行"}
+                </span>
+              </td>
+              <td className="actions">
+                <button className="ghost" disabled={busy} onClick={()=>runNow(job)}>立即执行</button>
+                <button className="ghost" disabled={busy} onClick={()=>toggle(job)}>
+                  {job.enabled?"停用":"启用"}
+                </button>
+                <button className="ghost" disabled={busy} onClick={()=>remove(job)}>删除</button>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!jobs.length && <p className="muted">{loading ? "加载中…" : "还没有定时任务。"}</p>}
       </div>
     </section>
   </div>;

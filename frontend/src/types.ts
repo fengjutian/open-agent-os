@@ -62,3 +62,9 @@ export interface Tenant {
 export interface Membership {
  id:string; subject:string; role:"admin"|"developer"|"viewer"|string; created_at:string;
 }
+
+export interface CronJob {
+ id:string; agent_id:string; conversation_id:string|null; name:string; prompt:string;
+ schedule:string; enabled:boolean; next_run_at:string; last_run_at:string|null;
+ last_status:string|null; last_error:string|null; created_at:string;
+}

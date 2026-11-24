@@ -41,6 +41,19 @@ Authorization: Bearer oak_xxxxxxxx
 没有成员的 OIDC 用户一律 403。为不存在的租户签发密钥返回 404；
 租户 `status=disabled` 后该租户的所有请求 403。
 
+### 定时任务
+
+- `POST /agents/{agent_id}/cron`：创建，body `{ name, prompt, schedule, conversation_id?, enabled? }`。
+  `schedule` 是标准 5 段 cron（分 时 日 月 周，**UTC**），也支持 `@daily` 等别名；
+  非法表达式返回 **422**（而不是 500）。
+- `GET /agents/{agent_id}/cron`：列表（分页）。
+- `GET /cron/{job_id}`：详情，含 `next_run_at` / `last_run_at` / `last_status` / `last_error`。
+- `PATCH /cron/{job_id}`：改名称/提示词/表达式/启用状态；改表达式会重算 `next_run_at`。
+- `DELETE /cron/{job_id}`：删除，204。
+- `POST /cron/{job_id}/run-now`：立即执行一次，不改动排期，返回更新后的任务。
+
+调度由服务端进程内循环驱动（`CRON_ENABLED` 控制，默认每 `CRON_TICK_SECONDS` 秒一轮）。
+**多实例部署会重复执行**，需要外部分布式锁；这条限制写在 `docs/features/cron.md`。
 ### 租户
 
 所有资源都属于某个租户。租户由凭据决定（API Key 的归属 / OIDC 的 `tenant` claim），

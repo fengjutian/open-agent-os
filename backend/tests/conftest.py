@@ -32,6 +32,8 @@ os.environ["MODEL_API_KEY"] = ""
 os.environ["LOG_LEVEL"] = "WARNING"
 # 产物落盘到临时目录，避免测试往仓库里写文件
 os.environ["ARTIFACT_DIR"] = (_TMP_DIR / "artifacts").as_posix()
+# 测试里不启后台调度循环：cron 用例直接调用 run_due_jobs()，避免时间相关的不稳定
+os.environ["CRON_ENABLED"] = "false"
 
 from uuid import uuid4  # noqa: E402
 

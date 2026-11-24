@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,AuditLog,Conversation,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,AuditLog,Conversation,CronJob,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -79,8 +79,7 @@ export const api={
   request<Page<Run>>(`/runs?limit=${limit}${agentId?`&agent_id=${encodeURIComponent(agentId)}`:""}`),
  runEvents:(runId:string)=>request<Page<RunEvent>>(`/runs/${runId}/events?limit=100`),
 
- currentTenant:()=>request<Tenant>("/tenants/current"),
- createTenant:(data:{id:string;name:string})=>
+ currentTenant:()=>request<Tenant>("/tenants/current"), createTenant:(data:{id:string;name:string})=>
   request<Tenant>("/tenants",{method:"POST",body:JSON.stringify(data)}),
  memberships:(limit=100)=>request<Page<Membership>>(`/memberships?limit=${limit}`),
  addMembership:(data:{subject:string;role:string})=>
@@ -88,6 +87,14 @@ export const api={
  updateMembership:(id:string,role:string)=>
   request<Membership>(`/memberships/${id}`,{method:"PATCH",body:JSON.stringify({role})}),
  removeMembership:(id:string)=>request<void>(`/memberships/${id}`,{method:"DELETE"}),
+
+ cronJobs:(agentId:string)=>request<Page<CronJob>>(`/agents/${agentId}/cron`),
+ createCronJob:(agentId:string,data:{name:string;prompt:string;schedule:string})=>
+  request<CronJob>(`/agents/${agentId}/cron`,{method:"POST",body:JSON.stringify(data)}),
+ updateCronJob:(id:string,patch:{enabled?:boolean;schedule?:string})=>
+  request<CronJob>(`/cron/${id}`,{method:"PATCH",body:JSON.stringify(patch)}),
+ deleteCronJob:(id:string)=>request<void>(`/cron/${id}`,{method:"DELETE"}),
+ runCronJobNow:(id:string)=>request<CronJob>(`/cron/${id}/run-now`,{method:"POST"}),
 };
 
 /** 流式回调：服务端按 SSE 事件推送。 */

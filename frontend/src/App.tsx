@@ -1,9 +1,9 @@
 import {useCallback,useEffect,useState} from "react";
 import {ApiError,api,keyStore,resumeRunStream,sendMessageStream} from "./api";
-import {RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
+import {CronPanel,RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
 import type {Agent,Conversation,Me,Message} from "./types";
 
-type View = "chat" | "tools" | "runs" | "org";
+type View = "chat" | "tools" | "runs" | "org" | "cron";
 
 export default function App(){
  const [apiKey,setApiKey]=useState(()=>keyStore.get());
@@ -198,7 +198,8 @@ export default function App(){
   ? (activeAgent?.name ?? "欢迎使用 Agent Platform")
   : view==="tools" ? "工具与策略"
   : view==="runs" ? "运行与审计"
-  : "组织与成员";
+  : view==="org" ? "组织与成员"
+  : "定时任务";
 
  return <div className="shell">
   <aside className="sidebar">
@@ -209,6 +210,7 @@ export default function App(){
     <button className={view==="tools"?"active":""} onClick={()=>setView("tools")}>工具</button>
     <button className={view==="runs"?"active":""} onClick={()=>setView("runs")}>运行</button>
     <button className={view==="org"?"active":""} onClick={()=>setView("org")}>组织</button>
+          <button className={view==="cron"?"active":""} onClick={()=>setView("cron")}>定时</button>
    </nav>
 
    <div className="label">AGENTS <button onClick={addAgent}>＋</button></div>
@@ -234,6 +236,7 @@ export default function App(){
    {view==="tools"&&<ToolsPanel agents={agents} me={me} onError={handleError}/>}
    {view==="runs"&&<RunsPanel agents={agents} onError={handleError}/>}
    {view==="org"&&<OrganizationPanel me={me} onError={handleError}/>}
+          {view==="cron"&&<CronPanel agents={agents} onError={handleError}/>}
 
    {view==="chat"&&<div className="layout">
     <section className="sessions">

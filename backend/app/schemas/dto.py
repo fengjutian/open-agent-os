@@ -265,6 +265,40 @@ class ToolInvocationRead(BaseModel):
     finished_at: UtcDatetime | None
 
 
+class CronJobCreate(BaseModel):
+    name: str = Field(default="scheduled job", min_length=1, max_length=120)
+    prompt: str = Field(min_length=1, max_length=30000)
+    # 标准 5 段 cron（分 时 日 月 周），UTC；也支持 @daily 等别名
+    schedule: str = Field(min_length=1, max_length=120)
+    conversation_id: str | None = None
+    enabled: bool = True
+
+
+class CronJobUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    prompt: str | None = Field(default=None, min_length=1, max_length=30000)
+    schedule: str | None = Field(default=None, min_length=1, max_length=120)
+    conversation_id: str | None = None
+    enabled: bool | None = None
+
+
+class CronJobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str
+    conversation_id: str | None = None
+    name: str
+    prompt: str
+    schedule: str
+    enabled: bool
+    next_run_at: UtcDatetime
+    last_run_at: UtcDatetime | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
 class AuditLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
