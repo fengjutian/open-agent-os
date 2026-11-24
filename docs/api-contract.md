@@ -56,6 +56,21 @@ Authorization: Bearer oak_xxxxxxxx
 检索默认按**词面覆盖率**排序（`KNOWLEDGE_RANKING=vector` 可切余弦），
 且要求查询与块至少共享一个词面特征——本地哈希向量在短文本上的随机相似度足以
 把无关内容排进结果，门控是必需的。模型侧通过内置工具 `knowledge_search` 使用。
+
+### 用量报表
+
+- `GET /usage/overview?days=30`：窗口内的总量指标——运行数、成功/失败、工具调用、
+  输入输出字符数、平均耗时、活跃 Agent/模型/工具数、日配额。`days` 取值 1..366。
+- `GET /usage/timeline?days=30&bucket=day`：按时间桶的序列，`bucket` 为
+  `day` / `week` / `month`；**没有数据的时间桶也会出现**（补零），便于直接画折线。
+- `GET /usage/breakdown?days=30&dimension=agent`：按维度分解，
+  `dimension` 为 `agent` / `model` / `tool`，按用量降序返回。
+
+口径：统计的是**运行次数与字符数**，不是 token——模型网关不解析 `usage`，
+所以这个接口回答不了「花了多少钱」。各维度的字段含义略有差别：
+`agent` / `model` 的运行数与字符数都来自运行记录；`tool` 维度的「运行」是
+用过该工具的运行数，「工具调用」是该工具的调用次数，字符数不适用。
+
 ### 长期记忆
 
 - `POST /memories`：写入一条记忆，body `{ content, agent_id?, tags?, source_conversation_id? }`；

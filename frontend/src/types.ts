@@ -99,3 +99,21 @@ export interface KnowledgeSearchHit {
 export interface KnowledgeSearchResponse {
  hits:KnowledgeSearchHit[]; count:number;
 }
+
+/** 用量报表：窗口内的总量指标。 */
+export interface UsageOverview {
+ days:number; runs:number; succeeded:number; failed:number; running:number;
+ tool_calls:number; prompt_chars:number; answer_chars:number; errors:number;
+ avg_duration_ms:number; agents:number; models:number; tools:number;
+ daily_run_quota:number;
+}
+
+/** 用量报表：时间桶上的一格。 */
+export interface UsageBucket {
+ key:string; runs:number; succeeded:number; failed:number; running:number;
+ tool_calls:number; prompt_chars:number; answer_chars:number; errors:number;
+ avg_duration_ms:number;
+}
+
+/** 用量报表：维度分解上的一项（label 是给人看的名字）。 */
+export interface UsageBreakdown extends UsageBucket { label:string }

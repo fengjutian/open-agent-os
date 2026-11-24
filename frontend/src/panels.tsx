@@ -1,6 +1,6 @@
-import {useCallback,useEffect,useState} from "react";
+import {useCallback,useEffect,useRef,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,Approval,AuditLog,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchHit,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchHit,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -830,6 +830,140 @@ export function KnowledgePanel({me,onError}:{me:Me|null;onError:(err:unknown)=>v
             {searched && !hits.length && <p className="muted">没有命中任何块。</p>}
           </>
           : <p className="muted">从左侧选择一个知识库，导入文档并检索。</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+const USAGE_DIMENSIONS = [
+  { value: "agent", label: "按 Agent" },
+  { value: "model", label: "按模型" },
+  { value: "tool", label: "按工具" },
+] as const;
+
+const USAGE_BUCKETS = [
+  { value: "day", label: "按天" },
+  { value: "week", label: "按周" },
+  { value: "month", label: "按月" },
+] as const;
+
+export function UsagePanel({onError}:{onError:(err:unknown)=>void}) {
+  const [days,setDays]=useState(30);
+  const [bucket,setBucket]=useState("day");
+  const [dimension,setDimension]=useState("agent");
+  const [overview,setOverview]=useState<UsageOverview|null>(null);
+  const [timeline,setTimeline]=useState<UsageBucket[]>([]);
+  const [breakdown,setBreakdown]=useState<UsageBreakdown[]>([]);
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const chartRef=useRef<HTMLDivElement|null>(null);
+
+  const reload = useCallback(async () => {
+    setBusy(true);
+    try {
+      const [total,series,parts] = await Promise.all([
+        api.usageOverview(days),
+        api.usageTimeline(days,bucket),
+        api.usageBreakdown(days,dimension),
+      ]);
+      setOverview(total);
+      setTimeline(series);
+      setBreakdown(parts);
+    } catch(err) { onError(err); }
+    finally { setLoading(false); setBusy(false); }
+  },[days,bucket,dimension,onError]);
+
+  useEffect(()=>{ reload(); },[reload]);
+
+  // 时间序列按时间正序，最新的在下面；默认滚到底，否则有数据的那天看不到
+  useEffect(()=>{
+    const node=chartRef.current;
+    if(node) node.scrollTop=node.scrollHeight;
+  },[timeline]);
+
+  const maxRuns = Math.max(1, ...timeline.map(item=>item.runs));
+  // 一年按天分桶会有三百多行，界面只画最近的一段
+  const visible = timeline.length>60 ? timeline.slice(-60) : timeline;
+  const dimensionLabel = USAGE_DIMENSIONS.find(item=>item.value===dimension)?.label ?? "分解";
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>统计窗口</h3>
+      <div className="stack">
+        <label className="muted" htmlFor="usage-days">时间范围</label>
+        <select id="usage-days" className="field" value={days} onChange={e=>setDays(Number(e.target.value))}>
+          <option value={7}>最近 7 天</option>
+          <option value={30}>最近 30 天</option>
+          <option value={90}>最近 90 天</option>
+          <option value={365}>最近 365 天</option>
+        </select>
+        <label className="muted" htmlFor="usage-bucket">时间粒度</label>
+        <select id="usage-bucket" className="field" value={bucket} onChange={e=>setBucket(e.target.value)}>
+          {USAGE_BUCKETS.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+        <label className="muted" htmlFor="usage-dimension">分解维度</label>
+        <select id="usage-dimension" className="field" value={dimension} onChange={e=>setDimension(e.target.value)}>
+          {USAGE_DIMENSIONS.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </div>
+      <p className="muted">
+        口径是运行次数与字符数，不是 token——模型网关目前不解析 usage，
+        所以这个报表回答不了「花了多少钱」。
+      </p>
+      <button className="ghost" onClick={reload} disabled={busy}>刷新</button>
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>用量</b><small>最近 {days} 天</small></div>
+        <span>● {loading ? "…" : "ok"}</span>
+      </div>
+      <div className="panel-body">
+        {overview
+          ? <>
+            <div className="stat-grid">
+              <div className="stat"><b>{overview.runs}</b><small>运行次数</small></div>
+              <div className="stat"><b>{overview.succeeded}</b><small>成功</small></div>
+              <div className="stat"><b className={overview.failed?"no":""}>{overview.failed}</b><small>失败</small></div>
+              <div className="stat"><b>{overview.tool_calls}</b><small>工具调用</small></div>
+              <div className="stat"><b>{(overview.avg_duration_ms/1000).toFixed(1)}s</b><small>平均耗时</small></div>
+              <div className="stat"><b>{overview.agents}</b><small>活跃 Agent</small></div>
+            </div>
+            <small className="muted">
+              输出 {overview.answer_chars} 字符 · 输入 {overview.prompt_chars} 字符 ·
+              覆盖 {overview.models} 个模型 / {overview.tools} 个工具 ·
+              日配额 {overview.daily_run_quota || "不限"} 次
+            </small>
+
+            <h3>时间序列</h3>
+            <div className="bar-chart" ref={chartRef}>
+              {visible.map(item=><div key={item.key} className="bar-row">
+                <span className="bar-label">{item.key}</span>
+                <progress className="bar-fill" value={item.runs} max={maxRuns}/>
+                <span className="bar-value">{item.runs}</span>
+              </div>)}
+            </div>
+            {!visible.length && <p className="muted">窗口内没有运行记录。</p>}
+
+            <h3>{dimensionLabel}</h3>
+            <table className="table">
+              <thead><tr><th>名称</th><th>运行</th><th>工具调用</th><th>错误</th><th>平均耗时</th></tr></thead>
+              <tbody>
+                {breakdown.map(item=><tr key={item.key}>
+                  <td>
+                    {item.label}
+                    {dimension==="agent" && <small className="muted"> · {item.key.slice(0,8)}</small>}
+                  </td>
+                  <td>{item.runs}</td>
+                  <td>{item.tool_calls}</td>
+                  <td className={item.errors?"no":"muted"}>{item.errors}</td>
+                  <td className="muted small">{(item.avg_duration_ms/1000).toFixed(1)}s</td>
+                </tr>)}
+              </tbody>
+            </table>
+            {!breakdown.length && <p className="muted">窗口内没有可分解的记录。</p>}
+          </>
+          : <p className="muted">{loading ? "加载中…" : "没有用量数据。"}</p>}
       </div>
     </section>
   </div>;

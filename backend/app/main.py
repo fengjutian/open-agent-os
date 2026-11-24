@@ -18,6 +18,7 @@ from app.api.run_routes import router as run_router
 from app.api.skill_routes import router as skill_router
 from app.api.tenant_routes import router as tenant_router
 from app.api.tool_routes import router as tool_router
+from app.api.usage_routes import router as usage_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.telemetry import init_telemetry, shutdown_telemetry
@@ -110,6 +111,7 @@ app.include_router(cron_router)
 app.include_router(approval_router)
 app.include_router(memory_router)
 app.include_router(knowledge_router)
+app.include_router(usage_router)
 
 
 @app.get("/health")

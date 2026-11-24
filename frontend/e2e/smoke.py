@@ -175,6 +175,13 @@ def main() -> int:
         assert "预算" in hit, f"检索结果应包含「预算」：{hit}"
         page.screenshot(path=str(shots / "11-knowledge.png"))
 
+        # ---- 8c. 用量报表 ----
+        page.click(".nav button:has-text('用量')")
+        page.wait_for_timeout(800)
+        assert page.locator(".stat").count() >= 1, "用量面板应显示指标卡"
+        print("[ok] 用量指标:", page.inner_text(".stat-grid").replace("\n", " "))
+        page.screenshot(path=str(shots / "12-usage.png"))
+
         # ---- 9. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})

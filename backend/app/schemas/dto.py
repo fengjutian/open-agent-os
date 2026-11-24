@@ -580,3 +580,45 @@ class MembershipRead(BaseModel):
     subject: str
     role: str
     created_at: UtcDatetime
+
+
+class UsageOverviewRead(BaseModel):
+    """窗口内的总量指标。"""
+
+    days: int
+    runs: int
+    succeeded: int
+    failed: int
+    running: int
+    tool_calls: int
+    prompt_chars: int
+    answer_chars: int
+    errors: int
+    avg_duration_ms: int
+    # 活跃维度数，方便一眼看出「用了几套东西」
+    agents: int
+    models: int
+    tools: int
+    # 日运行配额，与总量对照着看
+    daily_run_quota: int
+
+
+class UsageBucketRead(BaseModel):
+    """时间桶或维度分解上的一格。"""
+
+    key: str
+    runs: int
+    succeeded: int
+    failed: int
+    running: int
+    tool_calls: int
+    prompt_chars: int
+    answer_chars: int
+    errors: int
+    avg_duration_ms: int
+
+
+class UsageBreakdownRead(UsageBucketRead):
+    """维度分解项：key 是原始标识，label 是给人看的名字。"""
+
+    label: str

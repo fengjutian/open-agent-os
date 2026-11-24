@@ -1,9 +1,9 @@
 import {useCallback,useEffect,useState} from "react";
 import {ApiError,api,keyStore,resumeRunStream,sendMessageStream} from "./api";
-import {ApprovalPanel,CronPanel,KnowledgePanel,MemoryPanel,RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
+import {ApprovalPanel,CronPanel,KnowledgePanel,MemoryPanel,RunsPanel,ToolsPanel,OrganizationPanel,UsagePanel} from "./panels";
 import type {Agent,Conversation,Me,Message} from "./types";
 
-type View = "chat" | "tools" | "runs" | "org" | "cron" | "approvals" | "memory" | "knowledge";
+type View = "chat" | "tools" | "runs" | "org" | "cron" | "approvals" | "memory" | "knowledge" | "usage";
 
 export default function App(){
  const [apiKey,setApiKey]=useState(()=>keyStore.get());
@@ -207,7 +207,8 @@ export default function App(){
   : view==="cron" ? "定时任务"
   : view==="approvals" ? "人工审批"
   : view==="memory" ? "长期记忆"
-  : "知识库";
+  : view==="knowledge" ? "知识库"
+  : "用量";
 
  return <div className="shell">
   <aside className="sidebar">
@@ -222,6 +223,7 @@ export default function App(){
           <button className={view==="approvals"?"active":""} onClick={()=>setView("approvals")}>审批</button>
           <button className={view==="memory"?"active":""} onClick={()=>setView("memory")}>记忆</button>
           <button className={view==="knowledge"?"active":""} onClick={()=>setView("knowledge")}>知识库</button>
+          <button className={view==="usage"?"active":""} onClick={()=>setView("usage")}>用量</button>
    </nav>
 
    <div className="label">AGENTS <button onClick={addAgent}>＋</button></div>
@@ -251,6 +253,7 @@ export default function App(){
           {view==="approvals"&&<ApprovalPanel onError={handleError}/>}
           {view==="memory"&&<MemoryPanel agents={agents} onError={handleError}/>}
           {view==="knowledge"&&<KnowledgePanel me={me} onError={handleError}/>}
+          {view==="usage"&&<UsagePanel onError={handleError}/>}
 
    {view==="chat"&&<div className="layout">
     <section className="sessions">

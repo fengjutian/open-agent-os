@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchResponse,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchResponse,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -116,6 +116,10 @@ export const api={
   request<void>(`/knowledge-bases/${baseId}/documents/${id}`,{method:"DELETE"}),
  searchKnowledge:(baseId:string,query:string,limit=4)=>
   request<KnowledgeSearchResponse>(`/knowledge-bases/${baseId}/search`,{method:"POST",body:JSON.stringify({query,limit})}),
+
+ usageOverview:(days=30)=>request<UsageOverview>(`/usage/overview?days=${days}`),
+ usageTimeline:(days=30,bucket="day")=>request<UsageBucket[]>(`/usage/timeline?days=${days}&bucket=${bucket}`),
+ usageBreakdown:(days=30,dimension="agent")=>request<UsageBreakdown[]>(`/usage/breakdown?days=${days}&dimension=${dimension}`),
 };
 
 /** 流式回调：服务端按 SSE 事件推送。 */
