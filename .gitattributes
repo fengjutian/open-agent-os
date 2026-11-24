@@ -1,1 +1,6 @@
 * text=auto
+
+# Shell 脚本必须是 LF，否则从 Windows 检出的脚本在 Linux/macOS 上无法执行
+*.sh text eol=lf
+# PowerShell 脚本用 CRLF 更符合 Windows 习惯（LF 也能运行）
+*.ps1 text eol=crlf

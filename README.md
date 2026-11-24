@@ -8,10 +8,42 @@ V0.1 起步，当前已到 V0.2 Harness + V0.3 执行器竖切面：React + Type
 backend/          FastAPI + SQLAlchemy + Alembic（Agent Core）
 frontend/         React + TypeScript（Vite）
 rust-executor/    Rust Executor —— Docker 隔离执行后端（V0.3）
+scripts/          一键启动脚本（dev.py / dev.ps1 / dev.sh）
 docs/             PRD / 架构 / 数据模型 / API 契约 / 安全基线 / Roadmap
 ```
 
-## 本地启动
+## 一键启动（推荐）
+
+```powershell
+# Windows
+.\scripts\dev.ps1
+
+# macOS / Linux
+sh scripts/dev.sh
+```
+
+> PowerShell 若提示禁止运行脚本：`powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1`；
+> macOS/Linux 想直接 `./scripts/dev.sh` 的话先 `chmod +x scripts/dev.sh`。
+
+首次运行会自动创建 `backend/.venv`、安装后端依赖与前端依赖（`npm ci`），
+然后同时启动后端和前端，等两边就绪后打印地址；首次生成的 admin key 会被单独高亮一次。
+日志带 `[backend]` / `[frontend]` 前缀，按 `Ctrl+C` 一起停止。
+
+常用参数：
+
+| 参数 | 作用 |
+|---|---|
+| `--executor` | 构建 release 执行器并自动设置 `EXECUTOR_ENABLED` / `EXECUTOR_COMMAND`（需要 Docker） |
+| `--backend-port 8000` / `--frontend-port 5173` | 换端口（会同步设置 CORS 与前端 API 地址） |
+| `--backend-only` / `--frontend-only` | 只启动一侧 |
+| `--no-setup` | 不自动创建 venv / 安装依赖 |
+| `--install` | 强制重装依赖 |
+| `--python PATH` | 使用现成解释器，跳过 venv |
+
+等价命令是 `python scripts/dev.py`。启动前会检查端口占用，避免健康检查误命中旧进程；
+`--help` 可查看全部参数。
+
+## 手动启动（分步）
 
 后端：
 ```bash
