@@ -388,6 +388,10 @@ class ToolInvocation(TenantScoped):
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # succeeded | denied | failed
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 该结果是否因过大而从模型上下文里旁路掉了（完整数据仍在 result 里）
+    offloaded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # 结果序列化后的字符数；旁路时用来告诉模型这份数据有多大
+    result_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

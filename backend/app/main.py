@@ -30,6 +30,7 @@ from app.services.cron_scheduler import scheduler_loop
 from app.services.mcp_pool import get_mcp_pool
 from app.services.run_stream import get_run_hub
 from app.services.tenants import bootstrap_default_tenant
+from app.services.tool_offload import ensure_artifact_read_tool
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,11 @@ async def lifespan(app: FastAPI):
     # 原先是 Base.metadata.create_all；现在 schema 由 Alembic 迁移唯一负责。
     run_migrations()
     bootstrap_admin_key()
+    # 平台内建工具：artifact.read（取回被旁路的大结果）。
+    # 默认租户先注册一次；其它租户在首次调用时按需注册（见 tool_gateway）。
+    with SessionLocal() as db:
+        ensure_artifact_read_tool(db)
+        db.commit()
 
     # 定时任务调度：进程内轮询。多实例部署需要外部分布式锁，这里不假装支持。
     scheduler_task: asyncio.Task | None = None

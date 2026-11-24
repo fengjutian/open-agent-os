@@ -31,6 +31,11 @@ from app.services.knowledge import KNOWLEDGE_TOOL_NAME
 from app.services.policy import PolicyEngine
 from app.services.subagents import SPAWN_TOOL_NAME, run_subagent
 from app.services.tool_executor import execute_tool
+from app.services.tool_offload import (
+    ARTIFACT_READ_TOOL_NAME,
+    ensure_artifact_read_tool,
+    read_slice,
+)
 from app.services.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -121,6 +126,10 @@ class ToolGateway:
         self._db.flush()
 
         registry = ToolRegistry(self._db)
+        # artifact.read 是平台能力：按需在当前租户注册一次。
+        # 注册表里已经查得到（哪怕被管理员停用）就不动，听管理员的。
+        if tool_name == ARTIFACT_READ_TOOL_NAME:
+            ensure_artifact_read_tool(self._db)
 
         # ---- 第 1~3 步：存在性 → 参数契约 → 服务端策略 ----
         try:
@@ -208,6 +217,14 @@ class ToolGateway:
                 # 子代理不是普通工具实现：它要派生一次完整运行（自己的会话与 Run）
                 result = await run_subagent(
                     self._db, arguments=arguments, parent_run_id=run_id
+                )
+            elif tool.execution_type == "builtin" and tool.name == ARTIFACT_READ_TOOL_NAME:
+                # 取回被旁路的大结果：要读 DB，走网关分支
+                result = read_slice(
+                    self._db,
+                    invocation_id=str(arguments.get("invocation_id") or ""),
+                    offset=int(arguments.get("offset") or 0),
+                    limit=arguments.get("limit"),
                 )
             else:
                 result = await execute_tool(

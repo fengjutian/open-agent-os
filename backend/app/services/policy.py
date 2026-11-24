@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import PolicyRule
+from app.services.tool_offload import DEFAULT_ALLOWED_TOOLS
 
 ALLOW = "allow"
 DENY = "deny"
@@ -41,6 +42,16 @@ class PolicyEngine:
         )
         rules = self._db.scalars(statements).all()
         if not rules:
+            # 平台内建的只读工具（如 artifact.read）在没有任何规则时默认放行：
+            # 它是平台能力，不是用户注册的工具，要求每个人手工加规则才能用
+            # 只会让人误以为功能坏了。**显式 deny 仍然生效**——只要有规则命中，
+            # 就完全按规则裁决（上面已经走到这里说明没有规则命中）。
+            if tool_name in DEFAULT_ALLOWED_TOOLS:
+                return PolicyDecision(
+                    allowed=True,
+                    reason="平台内建只读工具，默认放行",
+                    effect=ALLOW,
+                )
             return PolicyDecision(
                 allowed=False,
                 reason="没有匹配的策略规则，按默认拒绝处理",

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,7 +16,15 @@ from app.core.logging import log_event
 from app.core.request_context import principal_key_id_var, run_id_var
 from app.core.telemetry import record_run, span
 from app.core.tenancy import current_tenant
-from app.models.entities import Agent, Conversation, Message, Run, ToolApproval, now_utc
+from app.models.entities import (
+    Agent,
+    Conversation,
+    Message,
+    Run,
+    ToolApproval,
+    ToolInvocation,
+    now_utc,
+)
 from app.schemas.dto import MessageRead
 from app.services.approvals import STATUS_PENDING_APPROVAL, ApprovalRequired
 from app.services.context import (
@@ -45,6 +53,14 @@ from app.services.runs import (
 from app.services.skills import compose_system_prompt
 from app.services.summarizer import summarize_history
 from app.services.tool_gateway import ToolCallOutcome, ToolGateway
+from app.services.tool_offload import (
+    ARTIFACT_READ_TOOL_NAME,
+    artifact_read_spec,
+    build_envelope,
+    offload_span,
+    serialize_result,
+    should_offload,
+)
 from app.services.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -417,6 +433,11 @@ class AgentRuntime:
             read_only_names=self._read_only_tool_names(db, agent_id=agent.id),
         )
         tool_names = [spec["function"]["name"] for spec in tool_specs]
+        # 之前有旁路结果时，把 artifact.read 一起暴露给模型，
+        # 这样它能在新一轮对话里把细节读回来。
+        if self._conversation_has_offloaded(db, conversation_id=conversation.id):
+            tool_specs = [*tool_specs, artifact_read_spec()]
+            tool_names = [*tool_names, ARTIFACT_READ_TOOL_NAME]
         messages: list[dict[str, Any]] = [
             {"role": m.role, "content": m.content} for m in context.messages
         ]
@@ -485,8 +506,8 @@ class AgentRuntime:
             state.messages.append(self._assistant_tool_call_message(reply))
             for call in reply.tool_calls:
                 tool_call_count += 1
-                outcome = await self._run_tool(db, state, call, iteration)
-                state.messages.append(self._tool_result_message(call, outcome))
+                outcome, offloaded = await self._run_tool(db, state, call, iteration)
+                state.messages.append(self._tool_result_message(call, outcome, offloaded))
         else:
             log_event(
                 logger,
@@ -537,6 +558,9 @@ class AgentRuntime:
             mode=mode,
             read_only_names=self._read_only_tool_names(db, agent_id=agent.id),
         )
+        # 续跑时同样要把 artifact.read 补回来：检查点里可能有被旁路的结果
+        if self._conversation_has_offloaded(db, conversation_id=conversation.id):
+            tool_specs = [*tool_specs, artifact_read_spec()]
         user_message = db.scalars(
             select(Message)
             .where(Message.conversation_id == conversation.id, Message.role == "user")
@@ -757,7 +781,8 @@ class AgentRuntime:
         state: _RunState,
         call: ToolCall,
         iteration: int,
-    ) -> ToolCallOutcome:
+    ) -> tuple[ToolCallOutcome, str | None]:
+        """执行一次工具调用。返回结果与「被旁路的结果文本」（未旁路时为 None）。"""
         outcome = await ToolGateway(db).invoke(
             run_id=state.run_id,
             tool_name=call.name,
@@ -784,7 +809,77 @@ class AgentRuntime:
                 tool_name=call.name,
                 iteration=iteration,
             )
-        return outcome
+        offloaded = self._maybe_offload(db, state, outcome, iteration=iteration)
+        return outcome, offloaded
+
+    def _maybe_offload(
+        self,
+        db: Session,
+        state: _RunState,
+        outcome: ToolCallOutcome,
+        *,
+        iteration: int,
+    ) -> str | None:
+        """结果过大时把它从模型上下文里剥离，并告诉模型怎么取回。
+
+        **数据没丢**：完整结果仍在 `ToolInvocation.result` 里，模型可以用
+        `artifact.read` 按需取回。返回被旁路的结果文本（未旁路时返回 None）。
+        """
+        serialized = serialize_result(outcome.result)
+        if serialized is None:
+            return None
+        if not should_offload(status=outcome.status, serialized=serialized):
+            return None
+
+        invocation = db.get(ToolInvocation, outcome.invocation_id)
+        if invocation is not None:
+            invocation.offloaded = True
+            invocation.result_chars = len(serialized)
+            db.flush()
+
+        # 模型看不到 artifact.read 就不会用它取回细节——
+        # 工具规格必须在旁路发生的那一刻就补上，下一轮请求里它才存在。
+        self._expose_artifact_read(state)
+        state.recorder.event(
+            "tool.result.offloaded",
+            iteration=iteration,
+            tool=outcome.tool_name,
+            chars=len(serialized),
+        )
+        offload_span(outcome.tool_name, len(serialized))
+        log_event(
+            logger,
+            "tool result offloaded",
+            tool=outcome.tool_name,
+            chars=len(serialized),
+            invocation_id=outcome.invocation_id,
+        )
+        return serialized
+
+    @staticmethod
+    def _expose_artifact_read(state: _RunState) -> None:
+        """把 artifact.read 加进本次运行的工具规格（已存在则不动）。"""
+        if any(
+            spec["function"]["name"] == ARTIFACT_READ_TOOL_NAME
+            for spec in state.tool_specs
+        ):
+            return
+        state.tool_specs.append(artifact_read_spec())
+        state.tool_names.append(ARTIFACT_READ_TOOL_NAME)
+
+    @staticmethod
+    def _conversation_has_offloaded(db: Session, *, conversation_id: str) -> bool:
+        """这个会话里是否出现过被旁路的结果。"""
+        return bool(
+            db.scalar(
+                select(func.count())
+                .select_from(ToolInvocation)
+                .where(
+                    ToolInvocation.conversation_id == conversation_id,
+                    ToolInvocation.offloaded.is_(True),
+                )
+            )
+        )
 
     @staticmethod
     def _read_only_tool_names(db: Session, *, agent_id: str) -> set[str]:
@@ -801,6 +896,10 @@ class AgentRuntime:
         engine = PolicyEngine(db)
         specs: list[dict[str, Any]] = []
         for tool in ToolRegistry(db).list_enabled():
+            if tool.name == ARTIFACT_READ_TOOL_NAME:
+                # 平台能力，不跟着注册表一起暴露：
+                # 只有真的存在旁路结果时才让模型看见它（见 _expose_artifact_read）
+                continue
             if not engine.evaluate(agent_id=agent_id, tool_name=tool.name).allowed:
                 continue
             specs.append(
@@ -835,13 +934,27 @@ class AgentRuntime:
         }
 
     @staticmethod
-    def _tool_result_message(call: ToolCall, outcome: ToolCallOutcome) -> dict[str, Any]:
+    def _tool_result_message(
+        call: ToolCall,
+        outcome: ToolCallOutcome,
+        offloaded: str | None = None,
+    ) -> dict[str, Any]:
         # 把治理结论原样回灌给模型：被拒绝时它能看到原因并调整，而不是凭空成功。
-        payload: dict[str, Any] = {"status": outcome.status}
-        if outcome.result is not None:
-            payload["result"] = outcome.result
-        if outcome.error_code is not None:
-            payload["error"] = {"code": outcome.error_code, "message": outcome.error_message}
+        if offloaded is not None:
+            # 结果过大：只给信封（状态 + 预览 + 引用），数据本体留在库里
+            payload = build_envelope(
+                invocation_id=outcome.invocation_id,
+                serialized=offloaded,
+            )
+        else:
+            payload: dict[str, Any] = {"status": outcome.status}
+            if outcome.result is not None:
+                payload["result"] = outcome.result
+            if outcome.error_code is not None:
+                payload["error"] = {
+                    "code": outcome.error_code,
+                    "message": outcome.error_message,
+                }
         return {
             "role": "tool",
             "tool_call_id": call.id,

@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     knowledge_max_scan_chunks: int = 5000
     # lexical：词面覆盖率（默认，可用本地向量时更准）；vector：余弦相似度
     knowledge_ranking: str = "lexical"
+    # 大 payload 旁路：工具结果超过这个长度就不进模型上下文，只给引用
+    tool_result_offload_enabled: bool = True
+    tool_result_offload_chars: int = 4000
+    # 旁路信封里给模型看的预览长度
+    tool_result_preview_chars: int = 400
     # 子代理：允许的最大嵌套层数（A 派 B 为 1 层）
     subagent_max_depth: int = 2
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）
