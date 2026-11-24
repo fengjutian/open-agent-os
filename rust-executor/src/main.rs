@@ -1,77 +1,110 @@
-//! Rust Executor — V0.3 占位实现。
+//! Rust Executor —— V0.3 Docker 执行后端。
 //!
-//! 本二进制**不具备任何执行能力**，也不打算在本版本中具备。它存在的目的只有两个：
+//! 从 stdin 读一个 JSON `ExecutionRequest`，交给 Docker 隔离执行，向 stdout 写一个
+//! JSON `ExecutionResult`。协议版本固定在 `schema_version = "1"`。
 //!
-//! 1. 让 `rust-executor` 成为一个可编译的 Cargo 包（此前 Cargo.toml 缺少 target，
-//!    `cargo build` 直接以 "no targets specified in the manifest" 失败）；
-//! 2. 把 ExecutionRequest / ExecutionResult 的**版本化协议形状**先固定下来，
-//!    供 Python 侧后续对接。
+//! 退出码约定：
 //!
-//! 任何请求都会被显式拒绝并以非零码退出。
+//! - `0`：产出了合法结果（即使工具本身失败/超时——那属于结果，不是执行器故障）；
+//! - `1`：请求无法解析或校验失败（stdout 里仍会有一条 `rejected` 结果）。
 //!
-//! 安全提醒：不要因为这里叫 "Executor" 就以为它提供隔离。真正的隔离必须由
-//! 容器 / gVisor / Firecracker 提供，Rust 进程本身不构成安全边界
-//! （见 docs/security.md 与 docs/architecture.md）。
+//! 安全边界由 Docker 提供（见 `docker.rs`）；本进程不直接执行用户命令。
+
+mod artifacts;
+mod docker;
+mod protocol;
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
-/// ExecutionRequest / ExecutionResult 的协议版本。
-const SCHEMA_VERSION: &str = "1";
+use protocol::{ExecutionRequest, ExecutionResult, MAX_REQUEST_BYTES, SCHEMA_VERSION};
 
-/// 单次请求的读取上限，避免被超大输入撑爆内存。
-const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
+#[tokio::main]
+async fn main() -> ExitCode {
+    if std::env::args().any(|arg| arg == "--check") {
+        return check();
+    }
 
-fn main() -> ExitCode {
     let mut raw = String::new();
-    if let Err(err) = io::stdin().take(MAX_REQUEST_BYTES).read_to_string(&mut raw) {
-        return reject("invalid_request", &format!("读取 stdin 失败: {err}"));
+    if let Err(err) = io::stdin()
+        .take(MAX_REQUEST_BYTES)
+        .read_to_string(&mut raw)
+    {
+        return emit_rejected("invalid_request", format!("读取 stdin 失败: {err}"));
     }
-
     if raw.trim().is_empty() {
-        return reject("invalid_request", "未在 stdin 收到 ExecutionRequest");
+        return emit_rejected("invalid_request", "未在 stdin 收到 ExecutionRequest");
     }
 
-    let request: Value = match serde_json::from_str(&raw) {
+    let value: Value = match serde_json::from_str(&raw) {
         Ok(value) => value,
-        Err(err) => return reject("invalid_request", &format!("请求不是合法 JSON: {err}")),
+        Err(err) => return emit_rejected("invalid_request", format!("请求不是合法 JSON: {err}")),
     };
 
-    let version = request
+    let version = value
         .get("schema_version")
         .and_then(Value::as_str)
         .unwrap_or("");
-
     if version != SCHEMA_VERSION {
-        return reject(
+        return emit_rejected(
             "unsupported_schema_version",
-            &format!("期望 schema_version \"{SCHEMA_VERSION}\"，实际收到 \"{version}\""),
+            format!("期望 schema_version \"{SCHEMA_VERSION}\"，实际收到 \"{version}\""),
         );
     }
 
-    // 走到这里说明请求形状是对的，但功能尚未实现——明确拒绝，绝不静默降级。
-    reject(
-        "executor_not_implemented",
-        "Rust Executor 是 V0.3 占位实现，拒绝一切代码执行请求；\
-         隔离能力需由容器 / gVisor / Firecracker 提供，尚未接入",
-    )
+    let request: ExecutionRequest = match serde_json::from_value(value) {
+        Ok(request) => request,
+        Err(err) => return emit_rejected("invalid_request", format!("请求字段不合法: {err}")),
+    };
+
+    let job = match request.into_job() {
+        Ok(job) => job,
+        Err(err) => return emit_rejected("invalid_request", err.0),
+    };
+
+    let name = docker::container_name();
+    let result = docker::run(&job, &name).await;
+    emit(&result, ExitCode::SUCCESS)
 }
 
-/// 输出结构化的 ExecutionResult 拒绝响应，并返回失败退出码。
-fn reject(code: &str, message: &str) -> ExitCode {
-    let result = json!({
+/// `agent-executor --check`：给运维一个不执行任何东西的健康检查。
+fn check() -> ExitCode {
+    let available = docker::docker_available();
+    let payload = serde_json::json!({
         "schema_version": SCHEMA_VERSION,
-        "status": "rejected",
-        "error": { "code": code, "message": message },
+        "docker_available": available,
+        "default_image": std::env::var("AGENT_EXECUTOR_DEFAULT_IMAGE")
+            .unwrap_or_else(|_| "python:3.12-slim".to_string()),
+        "default_user": protocol::default_user(),
     });
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    if serde_json::to_writer(&mut out, &result).is_ok() {
+    if serde_json::to_writer(&mut out, &payload).is_ok() {
         let _ = writeln!(out);
+        let _ = out.flush();
     }
 
-    ExitCode::from(1)
+    if available {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn emit_rejected(code: &str, message: impl Into<String>) -> ExitCode {
+    emit(&ExecutionResult::rejected(code, message), ExitCode::from(1))
+}
+
+fn emit(result: &ExecutionResult, code: ExitCode) -> ExitCode {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    if serde_json::to_writer(&mut out, result).is_err() {
+        return ExitCode::from(1);
+    }
+    let _ = writeln!(out);
+    let _ = out.flush();
+    code
 }

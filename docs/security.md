@@ -3,7 +3,8 @@
 ## V0.1
 - 模型 API Key 只从后端环境变量读取。
 - CORS 限制来源。
-- 不开放任意 Shell/Python/Node 执行接口。
+- 不开放任意 Shell/Python/Node 执行接口；V0.3 起只通过受治理的 `executor` 工具、
+  在 Docker 容器内执行，且默认关闭。
 - 不把模型输出视为可信指令。
 - 不在日志中打印密钥。
 
@@ -14,7 +15,8 @@
 - **deny-by-default**：没有 allow 规则命中就拒绝，规则由服务端维护，模型无法写入。
 - 固定顺序：注册表 → JSON Schema → Policy → 审计 → 执行；前一步不过不进入下一步。
 - 只向模型暴露**已被放行**的工具（未放行的连 schema 都看不到）。
-- 注册工具不产生执行能力：只有内建白名单中的实现可执行，`executor` 类型一律拒绝。
+- 注册工具不产生执行能力：`builtin` 只在白名单内执行，`mcp` 只能引用运维声明的服务器，
+  `executor` 必须经过 Docker 且默认关闭。
 - 每次调用写 `ToolInvocation`，并至少写一条 `AuditLog`；审计只记参数键名，不记参数值。
 - 工具超时通过 `timeout_seconds` 控制；实现内部异常不向调用方泄露细节。
 
@@ -33,8 +35,31 @@
 - 停用/缺失的技能在运行时跳过，不会静默改变已有 Agent 的行为而不留痕迹——
   生效列表记录在 `run.started` 事件中。
 
+### 隔离执行器（V0.3）
+
+- 命令只能来自调用参数，并完整经过 JSON Schema → Policy → 审计；注册工具时
+  `config` 里不允许写死 `command` / `argv`，避免「注册即获得命令通道」。
+- 镜像与运行时由工具定义约束；镜像名做白名单字符校验且不能以 `-` 开头，
+  防止被 Docker 当成命令行选项（例如 `--privileged`）。
+- 固定隔离参数：`--network none`、`--read-only` + `--tmpfs /tmp`、
+  `--cap-drop ALL`、`--security-opt no-new-privileges`、`--pids-limit`、
+  `--memory`/`--memory-swap`、`--cpus`；只挂载本次 workspace，不挂 docker socket。
+- 默认非 root：Python 侧把后端进程的 `uid:gid` 传给容器，workspace 的 0700 权限
+  不需要放宽；Windows 上 Docker Desktop 的 uid 映射不可靠，默认 `0:0`，强度弱于
+  Linux 非 root，应显式设置 `EXECUTOR_USER`。直接调用 Rust 时默认 `65534:65534`
+  （Windows `0:0`）。
+- 超时先 `docker kill` 再 `rm -f`，避免容器残留；stdout/stderr 按字节截断。
+- 产物只从 `/workspace/output` 收集普通文件，不跟随符号链接，拒绝 `../`、绝对路径
+  和盘符；落盘时再次做包含性校验，SHA-256 在 Python 侧重算。
+- 产物下载固定 `application/octet-stream` + attachment，避免用户内容在 API origin
+  下被当 HTML 渲染。
+
+**边界**：Docker 容器共享宿主机内核，隔离强度取决于 Docker 与内核配置，不是
+gVisor / Firecracker 级别的强隔离。执行器进程被攻破时，攻击面是运行它的宿主机账号
+与 Docker 权限，因此不要让它与不可信负载共享宿主机。
+
 ### 尚未实现
-人工审批、审计防篡改、跨租户隔离。
+人工审批、按工具调用配额、输入文件与网络白名单、审计外部锚定。
 
 ### 限流与配额（已实现）
 - 每密钥每分钟请求数（`RATE_LIMIT_PER_MINUTE`）与每 24 小时运行数（`DAILY_RUN_QUOTA`）。
@@ -101,15 +126,20 @@
 - 只信任 IdP 的 JWKS（TTL 缓存 + 未知 kid 强制刷新），本地不保存公钥。
 - 校验签名、`iss`、`aud`、`exp`、`nbf`；`sub/exp/iss/aud` 为必需字段。
 - 角色取自 claim 且只接受已定义角色，非法值降级为默认角色（默认 `viewer`）。
-- 局限：**只有认证，没有租户隔离**——所有认证身份共享同一份数据。
+- 局限：只做认证与租户归属；没有跨租户管理员视图。
 
 > 密钥引导：未配置 `BOOTSTRAP_ADMIN_API_KEY` 时，首次启动会自动生成管理员密钥并
 > 打印到日志。**日志因此包含一个有效凭据**，请限制日志访问范围，并在生产环境显式配置
 > `BOOTSTRAP_ADMIN_API_KEY` 以避免密钥出现在日志中。
 
-## Sandbox Security
-独立隔离环境；非 root；只读根文件系统；独立 workspace；CPU、内存、PID、磁盘和时间限制；默认禁网；禁止挂载宿主机 Docker Socket；不暴露云凭证和元数据服务；执行后清理。
+## Sandbox Security（V0.3 已落地）
 
-容器、gVisor 或 Firecracker 提供隔离边界。Rust 负责生命周期和资源控制，不单独构成安全边界。
+独立隔离环境；非 root（Windows 例外）；只读根文件系统；独立 workspace；
+CPU、内存、PID、输出与总时间限制；默认禁网；不挂宿主机 Docker Socket；
+不暴露云凭证与元数据服务；执行后清理 workspace 与容器。
 
-生产上线前补齐身份认证、OIDC、RBAC/ABAC、KMS、审计防篡改、限流、依赖扫描、镜像扫描和渗透测试。
+容器 / gVisor / Firecracker 提供隔离边界。Rust 负责生命周期和资源控制，
+不单独构成安全边界。当前只实现 Docker 后端，gVisor / Firecracker 待评估。
+
+上线前仍需补齐：KMS 与密钥轮换、镜像与依赖扫描、成本控制、渗透测试，
+以及更强的执行隔离。

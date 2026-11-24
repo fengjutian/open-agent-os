@@ -10,9 +10,11 @@ import asyncio
 import contextlib
 import logging
 import re
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,7 +25,15 @@ from app.core.errors import AppError, ErrorCode
 from app.core.request_context import run_id_var
 from app.core.security import INVOKE_TOOLS, READ, WRITE_POLICY, WRITE_TOOLS, Principal
 from app.db.session import get_db
-from app.models.entities import Agent, AuditLog, Conversation, PolicyRule, ToolDefinition, ToolInvocation
+from app.models.entities import (
+    Agent,
+    AuditLog,
+    Conversation,
+    PolicyRule,
+    ToolArtifact,
+    ToolDefinition,
+    ToolInvocation,
+)
 from app.schemas.dto import (
     AgentToolRead,
     AuditLogRead,
@@ -33,6 +43,7 @@ from app.schemas.dto import (
     Page,
     PolicyRuleCreate,
     PolicyRuleRead,
+    ToolArtifactRead,
     ToolCreate,
     ToolInvocationRead,
     ToolInvokeRequest,
@@ -40,6 +51,7 @@ from app.schemas.dto import (
     ToolRead,
     ToolUpdate,
 )
+from app.services.artifacts import stored_path
 from app.services.audit import AuditService
 from app.services.audit_chain import verify_chain
 from app.services.mcp_client import McpError, McpStdioClient
@@ -91,6 +103,75 @@ def _assert_mcp_config(payload: ToolCreate) -> None:
         )
 
 
+_EXECUTOR_RUNTIMES = frozenset({"shell", "python"})
+_IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$")
+_COMMAND_ARGUMENT_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
+
+
+def _is_string_type(value: object) -> bool:
+    return value == "string" or (isinstance(value, list) and "string" in value)
+
+
+def _assert_executor_config(payload: ToolCreate) -> None:
+    """隔离执行器工具只能在 config 里声明「运行时 + 镜像」，不能携带命令。
+
+    命令必须来自调用参数：这样它才会经过 JSON Schema 校验、策略裁决与审计，
+    而不是变成一条注册时就写死的任意命令通道。
+    """
+    if payload.execution_type != "executor":
+        return
+
+    config = payload.config or {}
+    forbidden = sorted({"command", "argv", "cmd"} & set(config))
+    if forbidden:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"executor 工具的 config 不允许携带命令字段（{', '.join(forbidden)}）；命令必须来自调用参数",
+            status_code=422,
+        )
+
+    runtime = config.get("runtime")
+    if runtime not in _EXECUTOR_RUNTIMES:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "execution_type=executor 时 config.runtime 必须是 shell 或 python",
+            status_code=422,
+        )
+
+    image = config.get("image")
+    if image is not None and (not isinstance(image, str) or not _IMAGE_PATTERN.match(image)):
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "config.image 不是合法的镜像引用（只允许字母、数字和 . _ - / : @，且不能以 - 开头）",
+            status_code=422,
+        )
+
+    argument_name = config.get("command_argument", "command")
+    if not isinstance(argument_name, str) or not _COMMAND_ARGUMENT_PATTERN.match(argument_name):
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "config.command_argument 必须匹配 ^[a-z_][a-z0-9_]{0,63}$",
+            status_code=422,
+        )
+
+    schema = payload.input_schema or {}
+    properties = schema.get("properties")
+    property_schema = properties.get(argument_name) if isinstance(properties, dict) else None
+    if not isinstance(property_schema, dict) or not _is_string_type(property_schema.get("type")):
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"executor 工具的 input_schema 必须把 {argument_name} 声明为 string",
+            status_code=422,
+        )
+    required = schema.get("required")
+    if not isinstance(required, list) or argument_name not in required:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"executor 工具的 input_schema 必须把 {argument_name} 列为必填",
+            status_code=422,
+        )
+
+
 def mcp_tool_name(server_name: str, remote_name: str) -> str:
     """把「服务器名 + 远程工具名」压成合法的本地工具名。"""
     raw = f"{server_name}.{remote_name}".lower()
@@ -113,6 +194,7 @@ def create_tool(
     # 注册时就校验 schema 本身合法，避免把坏契约存进库。
     assert_valid_schema(payload.input_schema)
     _assert_mcp_config(payload)
+    _assert_executor_config(payload)
 
     tool = ToolDefinition(**payload.model_dump())
     db.add(tool)
@@ -319,6 +401,12 @@ async def invoke_agent_tool(
     finally:
         run_id_var.reset(token)
 
+    stored_artifacts = db.scalars(
+        select(ToolArtifact)
+        .where(ToolArtifact.invocation_id == outcome.invocation_id)
+        .order_by(ToolArtifact.path)
+    ).all()
+
     return ToolInvokeResponse(
         run_id=run_id,
         invocation_id=outcome.invocation_id,
@@ -329,6 +417,7 @@ async def invoke_agent_tool(
         result=outcome.result,
         error_code=outcome.error_code,
         error_message=outcome.error_message,
+        artifacts=[ToolArtifactRead.model_validate(item) for item in stored_artifacts],
     )
 
 
@@ -362,6 +451,63 @@ def list_tool_invocations(
         .offset(offset)
     ).all()
     return Page[ToolInvocationRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/tool-invocations/{invocation_id}/artifacts",
+    response_model=Page[ToolArtifactRead],
+    responses=_TOOL_ERRORS,
+)
+def list_tool_artifacts(
+    invocation_id: str,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
+    """列出一次调用的产物索引（不返回文件内容）。"""
+    get_or_404(db, ToolInvocation, invocation_id, "ToolInvocation")
+
+    conditions = [ToolArtifact.invocation_id == invocation_id]
+    total = count_rows(db, ToolArtifact, *conditions)
+    items = db.scalars(
+        select(ToolArtifact)
+        .where(*conditions)
+        .order_by(ToolArtifact.path)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return Page[ToolArtifactRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/artifacts/{artifact_id}/download",
+    response_class=FileResponse,
+    responses={404: {"model": ErrorEnvelope, "description": "产物不存在"}},
+)
+def download_artifact(
+    artifact_id: str,
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
+    """下载产物文件。
+
+    始终以 `application/octet-stream` + attachment 返回，避免把用户可控内容
+    当 HTML 在同一 origin 下渲染。
+    """
+    artifact = get_or_404(db, ToolArtifact, artifact_id, "Artifact")
+    path = stored_path(artifact)
+    if path is None:
+        raise AppError(
+            ErrorCode.ARTIFACT_NOT_FOUND,
+            "产物文件不存在或已被清理",
+            status_code=404,
+        )
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=Path(artifact.path).name,
+    )
 
 
 @router.get("/audit-logs/verify", response_model=AuditVerifyResult)

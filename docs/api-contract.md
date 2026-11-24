@@ -148,14 +148,15 @@ Authorization: Bearer oak_xxxxxxxx
 
 - `POST /tools`：注册工具。body：`name`（`^[a-z][a-z0-9_.-]{1,63}$`）、`description`、
   `input_schema`（JSON Schema）、`permissions`、`timeout_seconds`（0–60）、
-  `execution_type`（`builtin` | `executor`）、`enabled`。重名返回 409，
+  `execution_type`（`builtin` | `mcp` | `executor`）、`enabled`。重名返回 409，
   `input_schema` 非法返回 422。
 - `GET /tools`：列表（分页）。
 - `GET /tools/{tool_id}`：详情。
 - `PATCH /tools/{tool_id}`：更新（`description`/`permissions`/`timeout_seconds`/`enabled`）。
 
-**注册工具不会产生执行能力。** 只有平台内建白名单里存在实现的工具才能执行；
-`execution_type=executor` 目前一律拒绝（等 V0.3 隔离执行器）。
+**注册工具不会产生执行能力。** `builtin` 只执行平台白名单里的实现；`mcp` 只能引用
+`MCP_SERVERS` 里由运维声明的服务器；`executor` 交给 Docker 执行器（默认关闭），
+且命令必须来自调用参数。
 
 ### 策略规则
 
@@ -205,6 +206,74 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 真实副作用不应被假装撤销。
 
 注册工具与写策略需要 `admin`；`developer` 只能调用已被放行的工具。
+
+### 隔离执行器（executor）
+
+注册时 `execution_type=executor`，`config` 只允许声明运行时与镜像：
+
+```json
+{
+  "name": "run_python",
+  "execution_type": "executor",
+  "config": {"runtime": "python", "image": "python:3.12-slim"},
+  "input_schema": {
+    "type": "object",
+    "properties": {"command": {"type": "string"}},
+    "required": ["command"],
+    "additionalProperties": false
+  }
+}
+```
+
+约束（违反返回 422）：
+
+- `config.runtime` ∈ `shell` | `python`；
+- `config` 不允许出现 `command` / `argv` / `cmd`——命令必须来自调用参数；
+- `input_schema` 必须把 `config.command_argument`（默认 `command`）声明为 `string`
+  且列为必填；
+- `config.image` 只允许字母、数字与 `. _ - / : @`，且不能以 `-` 开头。
+
+调用：`{"arguments": {"command": "print(1+1)"}}`。成功响应节选：
+
+```json
+{
+  "status": "succeeded",
+  "result": {
+    "exit_code": 0,
+    "stdout": "2\n",
+    "stderr": "",
+    "stdout_truncated": false,
+    "stderr_truncated": false,
+    "duration_ms": 412,
+    "artifacts": [{"path": "report.txt", "size": 14, "sha256": "...", "artifact_id": "..."}]
+  },
+  "artifacts": [
+    {"id": "...", "path": "report.txt", "size_bytes": 14, "sha256": "...", "tool_name": "run_python"}
+  ]
+}
+```
+
+失败时 `status=failed`，`error_code` 取值：
+
+| error_code | 含义 |
+|---|---|
+| `tool_execution_failed` | 容器退出码非 0（`error_message` 带截断后的 stderr） |
+| `tool_timeout` | 超过工具或 `EXECUTOR_TIMEOUT_SECONDS` 限制 |
+| `executor_not_available` | 执行器未启用、找不到可执行文件或 Docker 不可用 |
+| `executor_error` | 执行器返回无法解析或不兼容的结果 |
+| `tool_arguments_invalid` | 缺少命令参数或参数不符合 schema |
+
+产物接口：
+
+- `GET /tool-invocations/{invocation_id}/artifacts`：分页列出产物索引。
+- `GET /artifacts/{artifact_id}/download`：下载文件，固定 `application/octet-stream`
+  + `Content-Disposition: attachment`；文件缺失返回 404 `artifact_not_found`。
+- 只收集 `/workspace/output` 下的普通文件；不跟随符号链接，拒绝 `../` 与绝对路径；
+  大小与 SHA-256 以宿主机重新读取为准。
+
+> 隔离由 Docker 提供：`--network none`、`--read-only`、`--cap-drop ALL`、
+> `--pids-limit` / `--memory` / `--cpus`、默认非 root（Windows 例外）。
+> 执行器本身不是安全边界。
 
 ### 观测
 
@@ -317,4 +386,4 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 
 ## 后续版本
 
-后续增加 SSE 事件流、幂等键与任务取消。
+后续增加幂等键、任务取消、人工审批与按工具调用配额。

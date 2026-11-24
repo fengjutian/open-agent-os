@@ -30,6 +30,8 @@ os.environ["DATABASE_URL"] = "sqlite:///" + (_TMP_DIR / "test.db").as_posix()
 os.environ["MODEL_PROVIDER"] = "mock"
 os.environ["MODEL_API_KEY"] = ""
 os.environ["LOG_LEVEL"] = "WARNING"
+# 产物落盘到临时目录，避免测试往仓库里写文件
+os.environ["ARTIFACT_DIR"] = (_TMP_DIR / "artifacts").as_posix()
 
 from uuid import uuid4  # noqa: E402
 

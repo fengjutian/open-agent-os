@@ -18,6 +18,7 @@ export interface Tool {
  input_schema:Record<string,unknown>;
  permissions:string[]; timeout_seconds:number;
  execution_type:"builtin"|"executor"|string; enabled:boolean;
+ config?:Record<string,unknown>|null;
  created_at:string; updated_at:string;
 }
 

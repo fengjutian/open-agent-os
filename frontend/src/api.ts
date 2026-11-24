@@ -61,7 +61,7 @@ export const api={
  me:()=>request<Me>("/me"),
 
  tools:()=>request<Page<Tool>>("/tools"),
- createTool:(data:{name:string;description?:string;input_schema?:Record<string,unknown>;execution_type?:"builtin"|"executor"})=>
+ createTool:(data:{name:string;description?:string;input_schema?:Record<string,unknown>;execution_type?:"builtin"|"mcp"|"executor";config?:Record<string,unknown>})=>
   request<Tool>("/tools",{method:"POST",body:JSON.stringify(data)}),
  updateTool:(id:string,patch:{enabled?:boolean;description?:string})=>
   request<Tool>(`/tools/${id}`,{method:"PATCH",body:JSON.stringify(patch)}),

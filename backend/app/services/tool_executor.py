@@ -6,16 +6,18 @@
 1. `builtin` —— 名字命中内建白名单（echo、current_time）；
 2. `mcp` —— 转发给 `settings.mcp_servers` 里**由运维在环境变量中声明**的服务器，
    数据库里只保存服务器名，不能携带命令行；
-3. `executor` —— V0.3 的隔离执行器，当前一律拒绝。
+3. `executor` —— 交给 Rust Executor，在 Docker 容器里执行（V0.3）。
 
 MCP 是「借壳执行」的高风险点：拥有 write:tools 的管理员只能引用已声明的服务器，
-无法通过注册工具来跑任意二进制。
+无法通过注册工具来跑任意二进制。executor 同理：镜像与运行时由工具定义约束，
+命令只能来自模型参数，并且完整经过 schema 校验、策略与审计。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from collections.abc import Callable
 from typing import Any
 
@@ -23,6 +25,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.telemetry import span
 from app.models.entities import ToolDefinition, now_utc
+from app.services.artifacts import ArtifactStore, collect_from_workspace
+from app.services.executor_client import ExecutorClient, ExecutorRun
 from app.services.mcp_client import McpError
 from app.services.mcp_pool import get_mcp_pool
 
@@ -47,15 +51,30 @@ BUILTIN_IMPLEMENTATIONS: dict[str, BuiltinImplementation] = {
 }
 
 
-async def execute_tool(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[str, Any]:
+async def execute_tool(
+    tool: ToolDefinition,
+    arguments: dict[str, Any],
+    *,
+    invocation_id: str | None = None,
+    run_id: str | None = None,
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
     if tool.execution_type == "builtin":
         return await _execute_builtin(tool, arguments)
     if tool.execution_type == "mcp":
         return await _execute_mcp(tool, arguments)
+    if tool.execution_type == "executor":
+        return await _execute_executor(
+            tool,
+            arguments,
+            invocation_id=invocation_id,
+            run_id=run_id,
+            artifact_store=artifact_store,
+        )
 
     raise AppError(
         ErrorCode.EXECUTOR_NOT_AVAILABLE,
-        f"execution_type={tool.execution_type} 需要 V0.3 隔离执行器，当前版本不可用",
+        f"execution_type={tool.execution_type} 没有可用的执行后端",
         status_code=501,
     )
 
@@ -146,3 +165,136 @@ async def _execute_mcp(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[
             )
 
         return {"content": result.content, "text": result.text()}
+
+
+async def _execute_executor(
+    tool: ToolDefinition,
+    arguments: dict[str, Any],
+    *,
+    invocation_id: str | None,
+    run_id: str | None,
+    artifact_store: ArtifactStore | None,
+) -> dict[str, Any]:
+    """在 Docker 容器里执行命令，并把产物登记下来。
+
+    命令只能来自调用参数（`config.command_argument`，默认 `command`），
+    工具定义里不允许写死命令——否则「注册工具」就又变成了一条任意命令通道。
+    """
+    config = tool.config or {}
+    runtime = str(config.get("runtime") or "")
+    argument_name = str(config.get("command_argument") or "command")
+    command = arguments.get(argument_name)
+    if not isinstance(command, str) or not command.strip():
+        raise AppError(
+            ErrorCode.TOOL_ARGUMENTS_INVALID,
+            f"隔离执行器工具必须提供非空字符串参数 {argument_name}",
+            status_code=422,
+        )
+
+    image = str(config.get("image") or settings.executor_image)
+    timeout = min(
+        float(tool.timeout_seconds or settings.executor_timeout_seconds),
+        settings.executor_timeout_seconds,
+    )
+
+    with span(
+        "executor.run",
+        **{"executor.runtime": runtime, "executor.image": image},
+    ) as current:
+        run = await ExecutorClient().run(
+            tool_name=tool.name,
+            runtime=runtime,
+            command=command,
+            image=image,
+            timeout_seconds=timeout,
+        )
+        current.set_attribute("executor.status", run.status)
+        if run.exit_code is not None:
+            current.set_attribute("executor.exit_code", run.exit_code)
+        current.set_attribute("executor.artifacts", len(run.artifacts))
+
+    logger.info(
+        "executor run finished",
+        extra={
+            "fields": {
+                "tool": tool.name,
+                "status": run.status,
+                "exit_code": run.exit_code,
+                "duration_ms": run.duration_ms,
+                "artifacts": len(run.artifacts),
+            }
+        },
+    )
+
+    try:
+        if run.status == "timeout":
+            raise AppError(
+                ErrorCode.TOOL_TIMEOUT,
+                f"容器执行超时（{timeout:g}s）",
+                status_code=504,
+            )
+        if run.status != "succeeded":
+            raise AppError(
+                ErrorCode.TOOL_EXECUTION_FAILED,
+                _failure_message(run),
+                status_code=502,
+            )
+
+        collected = collect_from_workspace(run.workspace_dir, run.artifacts)
+        rows = []
+        if artifact_store is not None and invocation_id and run_id:
+            try:
+                rows = artifact_store.persist(
+                    invocation_id=invocation_id,
+                    run_id=run_id,
+                    tool_name=tool.name,
+                    artifacts=collected,
+                )
+            except OSError as exc:
+                logger.exception(
+                    "artifact persist failed",
+                    extra={"fields": {"tool": tool.name, "invocation_id": invocation_id}},
+                )
+                raise AppError(
+                    ErrorCode.TOOL_EXECUTION_FAILED,
+                    "命令已执行，但产物写入失败",
+                    status_code=500,
+                ) from exc
+
+        stored = {row.path: row for row in rows}
+        artifacts_payload = []
+        for item in collected:
+            entry: dict[str, Any] = {
+                "path": item.relative_path,
+                "size": item.size,
+                "sha256": item.sha256,
+            }
+            row = stored.get(item.relative_path)
+            if row is not None:
+                entry["artifact_id"] = row.id
+            artifacts_payload.append(entry)
+
+        return {
+            "exit_code": run.exit_code,
+            "stdout": run.stdout,
+            "stderr": run.stderr,
+            "stdout_truncated": run.stdout_truncated,
+            "stderr_truncated": run.stderr_truncated,
+            "duration_ms": run.duration_ms,
+            "artifacts": artifacts_payload,
+        }
+    finally:
+        # 工作目录里有本次调用的临时文件，无论成败都清掉。
+        shutil.rmtree(run.workspace_dir, ignore_errors=True)
+
+
+def _failure_message(run: ExecutorRun) -> str:
+    detail = run.stderr.strip()
+    if len(detail) > 800:
+        detail = "…" + detail[-800:]
+    prefix = (
+        f"命令执行失败（exit code {run.exit_code}）"
+        if run.exit_code is not None
+        else "命令执行失败"
+    )
+    return f"{prefix}：{detail}" if detail else prefix

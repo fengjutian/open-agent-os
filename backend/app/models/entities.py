@@ -256,6 +256,31 @@ class ToolInvocation(TenantScoped):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ToolArtifact(TenantScoped):
+    """隔离执行器产生的文件产物。
+
+    文件本身落在 `ARTIFACT_DIR/<tenant>/<invocation>/...`，这里只保存索引；
+    删除记录不会自动删文件（与审计同一思路：记录先于清理）。
+    """
+
+    __tablename__ = "tool_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "invocation_id", "path", name="uq_tool_artifacts_invocation_path"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    invocation_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # 相对 output 目录的路径，统一用 / 分隔
+    path: Mapped[str] = mapped_column(String(400), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class AuditLog(TenantScoped):
     """审计事件。同样不挂外键，保证记录不可被级联删除。
 

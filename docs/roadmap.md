@@ -19,9 +19,12 @@
 - ✅ Skill System（指令包 + 运行时注入 + 预算截断）
 
 ## V0.3 Execution
-- Rust Executor、Docker Sandbox
-- 超时取消、资源限制、文件产物
-- 评估 gVisor / Firecracker
+- ✅ Rust Executor + Docker Sandbox（隔离参数、超时取消、CPU/内存/PID 限制、
+  stdout/stderr 截断、workspace 生命周期）
+- ✅ `execution_type=executor` 打通治理链（注册校验 → Schema → Policy → Audit → Docker）
+- ✅ 产物收集、SHA-256 校验、索引与下载接口
+- ⏳ 输入文件挂载、网络白名单、执行中流式日志
+- ⏳ Sandbox backend trait（可切换 gVisor / Firecracker）
 
 ## V0.4 Enterprise
 - ⏳ OIDC、组织与多租户、RBAC/ABAC

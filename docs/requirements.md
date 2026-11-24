@@ -43,6 +43,9 @@ ToolDefinition 包含 name、description、input_schema、permissions、timeout�
 ### FR-Sandbox
 Rust Executor 管理隔离环境生命周期、资源限制和产物收集。隔离由容器、gVisor 或 Firecracker 等机制提供，Rust 进程本身不构成安全边界。
 
+> V0.3 已落地 Docker 后端（超时取消、CPU/内存/PID 限制、输出截断、产物收集）；
+> 输入文件、网络白名单与 gVisor / Firecracker 仍待做。
+
 ### FR-Observability
 统一 run_id、trace_id、事件、耗时、错误、重试、Token 和成本；敏感信息脱敏。
 

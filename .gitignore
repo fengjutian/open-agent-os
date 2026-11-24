@@ -15,3 +15,6 @@ target/
 .coverage
 htmlcov/
 *.egg-info/
+
+# 隔离执行器产物（默认 ARTIFACT_DIR）
+artifacts/

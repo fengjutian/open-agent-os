@@ -135,7 +135,8 @@ class ToolCreate(BaseModel):
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     execution_type: Literal["builtin", "mcp", "executor"] = "builtin"
     # execution_type=mcp 时形如 {"server": "echo", "tool": "echo"}；
-    # 只能引用 MCP_SERVERS 里声明过的服务器名。
+    # execution_type=executor 时形如 {"runtime": "shell", "image": "python:3.12-slim"}，
+    # 命令必须来自调用参数（config 里不允许携带命令）。
     config: dict[str, Any] | None = None
     enabled: bool = True
 
@@ -197,6 +198,20 @@ class ToolInvokeRequest(BaseModel):
     conversation_id: str | None = None
 
 
+class ToolArtifactRead(BaseModel):
+    """隔离执行器产物索引。文件内容通过下载接口获取。"""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    invocation_id: str
+    run_id: str
+    tool_name: str
+    path: str
+    size_bytes: int
+    sha256: str
+    created_at: UtcDatetime
+
+
 class ToolInvokeResponse(BaseModel):
     run_id: str
     invocation_id: str
@@ -207,6 +222,8 @@ class ToolInvokeResponse(BaseModel):
     result: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
+    # 只有 executor 工具会产生；按路径排序
+    artifacts: list[ToolArtifactRead] = Field(default_factory=list)
 
 
 class ToolInvocationRead(BaseModel):

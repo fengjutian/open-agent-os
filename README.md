@@ -1,13 +1,13 @@
 # Enterprise Agent Platform
 
-V0.1 starter：React + TypeScript 前端、Python + FastAPI Agent Core，预留 Rust Executor 边界。
+V0.1 起步，当前已到 V0.2 Harness + V0.3 执行器竖切面：React + TypeScript 前端、Python + FastAPI Agent Core、Rust Executor（Docker 隔离执行）。
 
 ## 目录结构
 
 ```text
 backend/          FastAPI + SQLAlchemy + Alembic（Agent Core）
 frontend/         React + TypeScript（Vite）
-rust-executor/    Rust Executor —— V0.3 占位，当前拒绝一切执行请求
+rust-executor/    Rust Executor —— Docker 隔离执行后端（V0.3）
 docs/             PRD / 架构 / 数据模型 / API 契约 / 安全基线 / Roadmap
 ```
 
@@ -172,8 +172,8 @@ curl -X POST localhost:8000/api/v1/policy-rules -H "Authorization: Bearer $API_K
 要点：
 
 - 策略裁决：priority 大者优先 → agent 专属优先于全局 → 同层 deny 优先于 allow。
-- **注册 ≠ 有执行能力**：只有内建白名单（`echo`、`current_time`）能真正执行；
-  `execution_type=executor` 一律返回 `executor_not_available`，等 V0.3 隔离执行器。
+- **注册 ≠ 有执行能力**：内建白名单（`echo`、`current_time`）可直接执行；
+  `executor` 需要 Docker 与执行器（默认关闭），`mcp` 需要运维声明服务器。
 - 每次调用都落 `ToolInvocation` 与 `AuditLog`（审计只记参数键名，不记参数值）。
 - 模型只能提出调用请求：Agent Loop 里只会把**已放行**的工具告诉模型，
   被拒绝的结果会连同原因回灌给模型，最多 `MAX_TOOL_ITERATIONS`（默认 4）轮。
@@ -278,7 +278,7 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 左栏四个视图，按当前角色的权限自动禁用无权操作（服务端仍然会再次校验）：
 
 - **对话**：Agent / 会话 / 消息（SSE 增量渲染）。
-- **工具**：注册工具、启停工具、按 Agent 维护 allow/deny 策略、查看最近审计。
+- **工具**：注册 builtin / executor 工具（含运行时与镜像）、启停工具、按 Agent 维护 allow/deny 策略、查看最近审计。
 - **运行**：运行列表 + 事件流详情。
 - **组织**：当前租户信息、开通租户、成员增删改与角色调整。
 
@@ -291,6 +291,22 @@ python -m app.evals --suite evals/baseline.json --suite evals/tools.json --json 
 - 列表在首次加载时显示「加载中…」，避免把「还没加载」误读成「没有数据」。
 - 窄屏（≤1024px）侧栏变成顶部条、双栏变单栏；≤640px 进一步隐藏次要信息，
   表格改为横向滚动，不撑破布局。
+
+界面截图（由 `frontend/e2e/smoke.py` 在 headless 浏览器里实际跑出来后截取）：
+
+| 对话 | 工具与策略 |
+|---|---|
+| ![对话](docs/screenshots/chat.png) | ![工具](docs/screenshots/tools.png) |
+
+| 组织与成员 | 手机宽度（420px） |
+|---|---|
+| ![组织](docs/screenshots/organization.png) | ![移动端](docs/screenshots/mobile.png) |
+
+### 浏览器冒烟测试
+
+`frontend/e2e/smoke.py` 用 Playwright 驱动真实浏览器，覆盖准入、新建 Agent/会话、
+流式发消息、四视图切换、窄屏布局与错误提示。用法见
+[frontend/e2e/README.md](frontend/e2e/README.md)。
 
 
 ## MCP 工具（V0.2）
@@ -611,9 +627,129 @@ REDIS_URL=redis://localhost:6379/0
 - 后端：`requirements.txt`（运行时）与 `requirements-dev.txt`（测试/lint）均使用 `==` 精确版本。
 - 升级依赖请显式改版本并同时更新锁文件，不要用 `latest`。
 
-## Rust Executor 现状
+## 隔离执行器（V0.3 竖切面）
 
-`rust-executor` 目前是一个**可编译但拒绝所有执行请求**的占位实现，用来固定 ExecutionRequest / ExecutionResult 的版本化协议形状。详见 [rust-executor/README.md](rust-executor/README.md)。
+`execution_type=executor` 的工具现在会真正进入 **Docker 容器**执行。链路：
+
+```text
+Tool Registry → JSON Schema → Policy → Audit → Rust Executor → Docker
+                                                      └─ /workspace/output → 产物
+```
+
+### 构建与启用
+
+```bash
+cargo build --release --manifest-path rust-executor/Cargo.toml
+export EXECUTOR_ENABLED=true
+export EXECUTOR_COMMAND="$PWD/rust-executor/target/release/agent-executor"
+# 可选：EXECUTOR_IMAGE=python:3.12-slim
+```
+
+宿主机必须能访问 Docker daemon。`agent-executor --check` 可以在不执行任何东西的
+前提下检查 Docker 是否就绪，并打印默认镜像与容器用户。
+
+> 不要把 `/var/run/docker.sock` 挂进业务容器再运行执行器：那会让执行器所在容器
+> 获得宿主机 root 等价能力。执行器应运行在受控宿主机或专用 runner 上。
+
+### 注册与调用
+
+```bash
+# 1. 注册（命令只能来自调用参数，config 里不允许写死命令）
+curl -X POST localhost:8000/api/v1/tools -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d '{
+  "name": "run_python",
+  "description": "执行一段 Python 代码",
+  "execution_type": "executor",
+  "config": {"runtime": "python", "image": "python:3.12-slim"},
+  "input_schema": {"type":"object","properties":{"command":{"type":"string"}},
+                   "required":["command"],"additionalProperties":false}
+}'
+
+# 2. 默认拒绝，仍需显式放行
+curl -X POST localhost:8000/api/v1/policy-rules -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id":"<AGENT_ID>","tool_name":"run_python","effect":"allow"}'
+
+# 3. 调用
+curl -X POST localhost:8000/api/v1/agents/<AGENT_ID>/tools/run_python/invoke \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"arguments":{"command":"print(1+1)"}}'
+```
+
+成功时 `result`：
+
+```json
+{"exit_code": 0, "stdout": "2\n", "stderr": "", "stdout_truncated": false,
+ "duration_ms": 412,
+ "artifacts": [{"path": "report.txt", "size": 14, "sha256": "...", "artifact_id": "..."}]}
+```
+
+失败时 `status=failed`，`error_code` 是 `tool_execution_failed` / `tool_timeout` /
+`executor_not_available`，`error_message` 会带上截断后的 stderr，方便模型自我修正。
+
+### 产物
+
+命令写到 `/workspace/output/` 下的普通文件会被收集、落盘并登记：
+
+```bash
+GET /api/v1/tool-invocations/{invocation_id}/artifacts
+GET /api/v1/artifacts/{artifact_id}/download
+```
+
+- 只收集 `output/` 下的普通文件；**不跟随符号链接**，`../` 与绝对路径一律拒绝；
+- 大小以宿主机重新读取为准，SHA-256 也在 Python 侧重算，执行器上报的清单只当索引；
+- 落盘路径 `ARTIFACT_DIR/<tenant>/<invocation_id>/<相对路径>`，下载强制
+  `application/octet-stream` + attachment，避免把用户内容当 HTML 渲染。
+
+### 隔离参数
+
+| 参数 | 值 | 作用 |
+|---|---|---|
+| `--network none` | 固定 | 默认禁网 |
+| `--read-only` | 固定 | 根文件系统只读 |
+| `--tmpfs /tmp` | 固定 | 唯一可写临时区 |
+| `--cap-drop ALL` | 固定 | 去掉所有 capability |
+| `--security-opt no-new-privileges` | 固定 | 禁止提权 |
+| `--pids-limit` | `EXECUTOR_PIDS_LIMIT` | 进程数上限 |
+| `--memory` / `--memory-swap` | `EXECUTOR_MEMORY_MB` | 内存上限（不落 swap） |
+| `--cpus` | `EXECUTOR_CPUS` | CPU 上限 |
+| `--user` | `EXECUTOR_USER` | 默认用后端进程的 uid:gid（Windows 为 0:0） |
+| `-v <workspace>:/workspace` | 每次调用 | 只挂载本次工作目录，不挂 docker socket |
+
+Windows 上 Docker Desktop 的 uid 映射不可靠，容器默认以 root 运行；在
+`--read-only` + `--cap-drop ALL` + `--network none` + 资源限制之下仍有边界，
+但**不要**把它当成与 Linux 非 root 同等级别的隔离。
+
+### 配置
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `EXECUTOR_ENABLED` | `false` | 总开关；关闭时执行器工具返回 `executor_not_available` |
+| `EXECUTOR_COMMAND` | `agent-executor` | 可执行文件，允许带参数（POSIX 引号规则） |
+| `EXECUTOR_IMAGE` | `python:3.12-slim` | 默认镜像 |
+| `EXECUTOR_USER` | 后端进程 uid:gid | 容器内用户；Windows 为 0:0 |
+| `EXECUTOR_TIMEOUT_SECONDS` | `30` | 硬超时；工具自身 timeout 只能更小 |
+| `EXECUTOR_MEMORY_MB` / `EXECUTOR_CPUS` | `512` / `1.0` | 资源上限 |
+| `EXECUTOR_PIDS_LIMIT` | `128` | 进程数上限 |
+| `EXECUTOR_MAX_OUTPUT_BYTES` | `65536` | stdout/stderr 各自上限，超出截断并标记 |
+| `EXECUTOR_MAX_ARTIFACT_BYTES` | `5242880` | 单文件上限（0 表示不限） |
+| `EXECUTOR_MAX_ARTIFACTS` | `20` | 单次调用产物数上限 |
+| `EXECUTOR_MAX_TOTAL_ARTIFACT_BYTES` | `20971520` | 单次调用落盘总量上限 |
+| `EXECUTOR_MAX_CONCURRENCY` | `2` | 同时运行的容器数 |
+| `EXECUTOR_GRACE_SECONDS` | `10` | 工具超时后给执行器收尾的宽限 |
+| `ARTIFACT_DIR` | `./artifacts` | 产物根目录 |
+| `EXECUTOR_WORKDIR` | 系统临时目录 | 执行工作目录的父目录 |
+
+### 已知边界
+
+- 只有 Docker 后端；gVisor / Firecracker 未接入。
+- 输入文件、网络白名单、镜像预热/快照、执行中流式日志都还没有。
+- 单机同步调用：没有队列与跨进程调度；后端进程崩溃时容器可能残留，
+  可用 `docker ps --filter label=agent-executor=1` 清理。
+- 产物没有保留期与清理任务：`ARTIFACT_DIR` 会随调用增长，需要运维自行制定清理策略；
+  删除 `tool_artifacts` 记录不会删除磁盘文件。
+- 前端对话里暂不展示工具调用结果与产物，产物需要通过上面的 API 查看。
+- 人工审批、按工具调用配额仍未实现。
 
 ## 当前能力
 - Agent CRUD（创建、列表、详情、更新、删除）
@@ -636,10 +772,18 @@ REDIS_URL=redis://localhost:6379/0
 - 评测与回归（JSON 数据集 + 断言 + CLI）
 - MCP 工具接入（stdio 客户端 + 同步 + 仍走治理链）
 - 技能系统（可复用指令包 + 运行时注入）
+- 隔离执行器（Docker：超时取消、CPU/内存/PID 限制、输出截断、产物收集）
+- 工具产物索引、SHA-256 校验与下载接口
 - React 界面：对话、工具与策略、运行与审计、组织与成员四个视图
 
 ## 重要边界
-V0.2 不执行任意 Shell / Python / Node 代码。已有 API Key 认证与三角色 RBAC，
-但**没有**多租户隔离、OIDC/SSO、密钥轮换与过期、限流与配额、生产级任务恢复。
-Rust Executor 目前是架构预留，不是可用 Sandbox。
-生产环境必须补充隔离机制、组织级鉴权、限流和密钥管理。
+
+- **代码执行只走 Docker 后端，且默认关闭**。容器共享宿主机内核，它不是
+  gVisor / Firecracker 级别的安全边界；只应运行可信度可控的代码。更强的隔离未接入。
+- 没有人工审批、按工具的调用配额、输入文件与网络白名单。
+- 没有 Temporal 级的持久任务恢复：运行与容器都绑在当前进程上，进程崩溃会留下
+  半截运行与可能残留的容器（手工清理见上文）。
+- 审计哈希链只保证局部改动可发现；删除链尾或整体重算需要外部锚定（WORM/透明日志）。
+- 没有平台级超管、计费与成本计量；API Key 轮换/过期未实现。
+- 多租户隔离、OIDC、限流与配额已实现（见上文），但跨租户管理视图仍缺。
+- 生产环境仍需补充：组织级鉴权细化、成本控制、任务恢复与更强的执行隔离。

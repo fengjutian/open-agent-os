@@ -24,6 +24,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.telemetry import record_tool, span
 from app.core.tenancy import current_tenant
 from app.models.entities import ToolInvocation, now_utc
+from app.services.artifacts import ArtifactStore
 from app.services.audit import AuditService, agent_actor
 from app.services.policy import PolicyEngine
 from app.services.tool_executor import execute_tool
@@ -133,7 +134,13 @@ class ToolGateway:
 
         # ---- 第 5 步：执行 ----
         try:
-            result = await execute_tool(tool, arguments)
+            result = await execute_tool(
+                tool,
+                arguments,
+                invocation_id=invocation.id,
+                run_id=run_id,
+                artifact_store=ArtifactStore(self._db),
+            )
         except AppError as exc:
             invocation.status = STATUS_FAILED
             invocation.error_code = exc.code

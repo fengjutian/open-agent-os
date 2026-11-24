@@ -67,6 +67,32 @@ class Settings(BaseSettings):
     run_stream_max_seconds: float = 120.0
     # 注入 system prompt 的技能内容字符上限，超出则截断。
     skill_max_chars: int = 8000
+    # ---- V0.3 隔离执行器（Docker）----
+    # 默认关闭：需要本机装好 Docker、并构建 rust-executor 之后才能启用。
+    executor_enabled: bool = False
+    # 执行器可执行文件；允许带参数（按 POSIX 引号规则拆分），便于指向 cargo 产物。
+    executor_command: str = "agent-executor"
+    executor_image: str = "python:3.12-slim"
+    # 容器用户 uid:gid；留空表示用后端进程自身的 uid:gid（Windows 上为 0:0）。
+    executor_user: str = ""
+    # 单次执行的硬上限；工具自身的 timeout_seconds 只能更小。
+    executor_timeout_seconds: float = 30.0
+    executor_memory_mb: int = 512
+    executor_cpus: float = 1.0
+    executor_pids_limit: int = 128
+    executor_max_output_bytes: int = 65536
+    executor_max_artifact_bytes: int = 5_242_880
+    executor_max_artifacts: int = 20
+    # 单次调用落盘的产物总量上限。
+    executor_max_total_artifact_bytes: int = 20_971_520
+    # 同时运行的容器数上限（每个后端进程）。
+    executor_max_concurrency: int = 2
+    # 工具超时之外，再给执行器多少秒收尾（杀容器、写结果）。
+    executor_grace_seconds: float = 10.0
+    # 产物落盘根目录（按租户 / 调用 id 分目录）。
+    artifact_dir: str = "./artifacts"
+    # 执行工作目录的父目录；留空表示系统临时目录。
+    executor_workdir: str = ""
     # ---- OpenTelemetry ----
     # 默认关闭：埋点始终存在，但没有 provider 时是 no-op，成本接近于零。
     otel_enabled: bool = False

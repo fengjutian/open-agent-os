@@ -14,6 +14,15 @@ const DEFAULT_SCHEMA = `{
   "additionalProperties": false
 }`;
 
+const EXECUTOR_SCHEMA = `{
+  "type": "object",
+  "properties": {
+    "command": { "type": "string" }
+  },
+  "required": ["command"],
+  "additionalProperties": false
+}`;
+
 function shortId(id:string):string {
   return id.length > 14 ? `${id.slice(0,14)}…` : id;
 }
@@ -35,6 +44,9 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
   const [name,setName]=useState("");
   const [description,setDescription]=useState("");
   const [schema,setSchema]=useState(DEFAULT_SCHEMA);
+  const [executionType,setExecutionType]=useState<"builtin"|"executor">("builtin");
+  const [runtime,setRuntime]=useState<"shell"|"python">("shell");
+  const [image,setImage]=useState("");
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
 
@@ -59,6 +71,11 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
   useEffect(() => { reload(); },[reload]);
   useEffect(() => { reloadAgentTools(agentId); },[agentId,reloadAgentTools]);
 
+  function changeType(next:"builtin"|"executor") {
+    setExecutionType(next);
+    setSchema(next==="executor" ? EXECUTOR_SCHEMA : DEFAULT_SCHEMA);
+  }
+
   async function register(event:React.FormEvent) {
     event.preventDefault();
     if(!name.trim()) return;
@@ -69,7 +86,13 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
 
     setBusy(true);
     try {
-      await api.createTool({name:name.trim(),description:description.trim(),input_schema:parsed});
+      const payload:{name:string;description?:string;input_schema:Record<string,unknown>;execution_type:"builtin"|"executor";config?:Record<string,unknown>} = {
+        name:name.trim(), description:description.trim(), input_schema:parsed, execution_type:executionType,
+      };
+      if(executionType==="executor") {
+        payload.config = {runtime, ...(image.trim() ? {image:image.trim()} : {})};
+      }
+      await api.createTool(payload);
       setName(""); setDescription("");
       await reload(); await reloadAgentTools(agentId);
     } catch(err) { onError(err); }
@@ -102,8 +125,25 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
         ? <form className="stack" onSubmit={register}>
             <input className="field" value={name} onChange={e => setName(e.target.value)} placeholder="工具名，例如 echo" />
             <input className="field" value={description} onChange={e => setDescription(e.target.value)} placeholder="描述" />
+            <label className="muted" htmlFor="tool-type">类型</label>
+            <select id="tool-type" className="field" value={executionType} onChange={e => changeType(e.target.value as "builtin"|"executor")}>
+              <option value="builtin">builtin（内建实现）</option>
+              <option value="executor">executor（Docker 隔离执行）</option>
+            </select>
+            {executionType==="executor" && <>
+              <label className="muted" htmlFor="tool-runtime">运行时</label>
+              <select id="tool-runtime" className="field" value={runtime} onChange={e => setRuntime(e.target.value as "shell"|"python")}>
+                <option value="shell">shell</option>
+                <option value="python">python</option>
+              </select>
+              <input className="field" value={image} onChange={e => setImage(e.target.value)} placeholder="镜像（可选，默认 python:3.12-slim）" />
+            </>}
             <textarea className="field mono" rows={9} spellCheck={false} value={schema} onChange={e => setSchema(e.target.value)} />
-            <small className="muted">内建实现只有 echo 与 current_time；注册其它名字不会获得执行能力。</small>
+            <small className="muted">
+              {executionType==="executor"
+                ? "命令由模型调用时给出，仍需策略放行；服务端要启用 EXECUTOR_ENABLED。"
+                : "内建实现只有 echo 与 current_time；注册其它名字不会获得执行能力。"}
+            </small>
             <button className="primary" type="submit" disabled={busy || !name.trim()}>注册工具</button>
           </form>
         : <p className="muted">当前角色只读，注册工具需要 admin。</p>}

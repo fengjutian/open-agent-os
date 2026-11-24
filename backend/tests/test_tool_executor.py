@@ -10,9 +10,19 @@ from app.models.entities import ToolDefinition
 from app.services import tool_executor
 
 
-def _tool(name: str, execution_type: str = "builtin", timeout: float = 5.0) -> ToolDefinition:
+def _tool(
+    name: str,
+    execution_type: str = "builtin",
+    timeout: float = 5.0,
+    config: dict | None = None,
+) -> ToolDefinition:
     # 不落库，只构造一个带属性的对象
-    return ToolDefinition(name=name, execution_type=execution_type, timeout_seconds=timeout)
+    return ToolDefinition(
+        name=name,
+        execution_type=execution_type,
+        timeout_seconds=timeout,
+        config=config,
+    )
 
 
 def run(coro):
@@ -41,9 +51,12 @@ def test_registered_but_unimplemented_tool_cannot_execute():
     assert excinfo.value.code == ErrorCode.TOOL_EXECUTION_FAILED
 
 
-def test_executor_type_is_refused():
+def test_executor_type_is_refused_when_disabled():
+    """执行器默认关闭：注册了 executor 工具也不能凭空获得执行能力。"""
+    tool = _tool("run", execution_type="executor", config={"runtime": "shell"})
+
     with pytest.raises(AppError) as excinfo:
-        run(tool_executor.execute_tool(_tool("echo", execution_type="executor"), {"text": "x"}))
+        run(tool_executor.execute_tool(tool, {"command": "echo hi"}))
 
     assert excinfo.value.code == ErrorCode.EXECUTOR_NOT_AVAILABLE
     assert excinfo.value.status_code == 501

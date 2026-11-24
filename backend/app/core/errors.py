@@ -33,6 +33,10 @@ class ErrorCode:
     EXECUTOR_NOT_AVAILABLE = "executor_not_available"
     MCP_ERROR = "mcp_error"
 
+    # ---- V0.3 隔离执行器 ----
+    EXECUTOR_ERROR = "executor_error"
+    ARTIFACT_NOT_FOUND = "artifact_not_found"
+
 
 class AppError(Exception):
     """可安全返回给客户端业务错误。"""

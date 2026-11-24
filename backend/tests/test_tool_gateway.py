@@ -95,14 +95,33 @@ def test_explicit_deny_rule_wins(client, agent, allow_echo):
     assert body["error_code"] == "policy_denied"
 
 
-def test_executor_tool_fails_explicitly(client, agent):
-    client.post("/api/v1/tools", json={"name": "run_code", "execution_type": "executor"})
+def test_executor_tool_fails_explicitly_when_disabled(client, agent, monkeypatch):
+    """executor 工具默认不可用；失败要显式报 executor_not_available，而不是假装成功。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "executor_enabled", False)
+
+    created = client.post(
+        "/api/v1/tools",
+        json={
+            "name": "run_code",
+            "execution_type": "executor",
+            "config": {"runtime": "shell"},
+            "input_schema": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
     client.post(
         "/api/v1/policy-rules",
         json={"agent_id": agent["id"], "tool_name": "run_code", "effect": "allow"},
     )
 
-    body = _invoke(client, agent, "run_code", {}).json()
+    body = _invoke(client, agent, "run_code", {"command": "echo hi"}).json()
     assert body["status"] == "failed"
     assert body["error_code"] == "executor_not_available"
 
