@@ -551,6 +551,40 @@ def list_tool_artifacts(
 
 
 @router.get(
+    "/artifacts",
+    response_model=Page[ToolArtifactRead],
+    responses=_TOOL_ERRORS,
+)
+def list_artifacts(
+    run_id: str | None = Query(default=None),
+    tool_name: str | None = Query(default=None),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+    _principal: Principal = Depends(require_permission(READ)),
+    db: Session = Depends(get_db),
+):
+    """列出本租户的产物索引（不返回文件内容）。
+
+    租户隔离由 ORM 强制过滤（`ToolArtifact` 是 `TenantScoped`），
+    所以这个接口天然看不到别人的产物。
+    """
+    conditions = []
+    if run_id:
+        conditions.append(ToolArtifact.run_id == run_id)
+    if tool_name:
+        conditions.append(ToolArtifact.tool_name == tool_name)
+    total = count_rows(db, ToolArtifact, *conditions)
+    items = db.scalars(
+        select(ToolArtifact)
+        .where(*conditions)
+        .order_by(ToolArtifact.created_at.desc(), ToolArtifact.id)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return Page[ToolArtifactRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
     "/artifacts/{artifact_id}/download",
     response_class=FileResponse,
     responses={404: {"model": ErrorEnvelope, "description": "产物不存在"}},

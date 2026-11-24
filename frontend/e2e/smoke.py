@@ -182,6 +182,18 @@ def main() -> int:
         print("[ok] 用量指标:", page.inner_text(".stat-grid").replace("\n", " "))
         page.screenshot(path=str(shots / "12-usage.png"))
 
+        # ---- 8d. 产物中心 ----
+        page.click(".nav button:has-text('产物')")
+        page.wait_for_timeout(800)
+        assert page.inner_text("header h1").strip() == "产物", "应切到产物视图"
+        # 列表接口必须调通：不能冒出错误提示
+        assert page.locator(".error").count() == 0, page.inner_text(".error span")
+        body_text = page.inner_text(".panel-body")
+        # 本机没有 Docker，产物列表为空是正常的：面板要能正常渲染（表头或空态）
+        assert ("产物 ID" in body_text) or ("还没有产物" in body_text), body_text[:80]
+        print("[ok] 产物视图:", body_text.replace("\n", " ")[:40])
+        page.screenshot(path=str(shots / "13-artifacts.png"))
+
         # ---- 9. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})

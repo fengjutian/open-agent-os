@@ -22,7 +22,7 @@
 - ✅ Rust Executor + Docker Sandbox（隔离参数、超时取消、CPU/内存/PID 限制、
   stdout/stderr 截断、workspace 生命周期）
 - ✅ `execution_type=executor` 打通治理链（注册校验 → Schema → Policy → Audit → Docker）
-- ✅ 产物收集、SHA-256 校验、索引与下载接口
+- ✅ 产物收集、SHA-256 校验、索引与下载接口、租户级产物列表与前端「产物」视图
 - ✅ 输入文件挂载（只读挂载本租户产物，见
   [features/executor-input-mounts.md](features/executor-input-mounts.md)）
 - ⏳ 网络白名单、执行中流式日志

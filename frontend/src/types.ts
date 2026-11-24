@@ -117,3 +117,12 @@ export interface UsageBucket {
 
 /** 用量报表：维度分解上的一项（label 是给人看的名字）。 */
 export interface UsageBreakdown extends UsageBucket { label:string }
+
+/**
+ * 隔离执行器的文件产物索引。
+ * 列表不返回文件内容，下载走 /artifacts/{id}/download。
+ */
+export interface Artifact {
+ id:string; invocation_id:string; run_id:string; tool_name:string;
+ path:string; size_bytes:number; sha256:string; created_at:string;
+}

@@ -186,3 +186,9 @@
 .bar-fill::-webkit-progress-value{background:#3b6fd4;border-radius:4px}
 .bar-fill::-moz-progress-bar{background:#3b6fd4;border-radius:4px}
 .bar-value{width:38px;flex:none;font-size:11px;color:#c7d3e4;text-align:right}
+
+/* 产物中心：产物 id 要能选中复制，所以不能做成不可选的装饰文本 */
+.artifact-id{
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+ font-size:11px;color:#8ba7d8;user-select:text;cursor:text;
+}

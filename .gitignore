@@ -18,6 +18,7 @@ htmlcov/
 
 # 隔离执行器产物（默认 ARTIFACT_DIR）
 artifacts/
+e2e-artifacts/
 
 # SQLite WAL 边车文件
 *.db-wal

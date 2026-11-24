@@ -409,3 +409,76 @@ def test_real_executor_binary_enforces_timeout(client, agent, monkeypatch):
     body = _invoke(client, agent, "run_shell", {"command": "sleep 30"}).json()
     assert body["status"] == "failed"
     assert body["error_code"] == "tool_timeout"
+
+
+# ---------------------------------------------------------------------------
+# 产物列表（租户级）
+# ---------------------------------------------------------------------------
+
+
+def _produce_artifact(client, agent, monkeypatch, name="run_shell"):
+    _configure(monkeypatch, "success")
+    _create_tool(client, name=name)
+    _allow(client, agent, name)
+    body = _invoke(client, agent, name, {"command": "echo hi"}).json()
+    assert body["status"] == "succeeded", body
+    return body
+
+
+def test_artifacts_are_listed_across_invocations(client, agent, monkeypatch):
+    """产物中心要能看到租户的全部产物，而不是只有某一次调用的。"""
+    body = _produce_artifact(client, agent, monkeypatch)
+    artifact_id = body["artifacts"][0]["id"]
+
+    page = client.get("/api/v1/artifacts").json()
+    assert page["total"] == 1
+    item = page["items"][0]
+    assert item["id"] == artifact_id
+    assert item["path"] == "report.txt"
+    assert item["tool_name"] == "run_shell"
+    assert item["size_bytes"] == len(b"hello artifact")
+    assert len(item["sha256"]) == 64
+
+
+def test_artifacts_can_be_filtered(client, agent, monkeypatch):
+    body = _produce_artifact(client, agent, monkeypatch)
+    run_id = body["run_id"]
+
+    assert client.get("/api/v1/artifacts", params={"run_id": run_id}).json()["total"] == 1
+    assert client.get("/api/v1/artifacts", params={"tool_name": "run_shell"}).json()["total"] == 1
+    # 过滤条件不命中时返回空列表，而不是 404
+    assert client.get("/api/v1/artifacts", params={"tool_name": "other"}).json()["total"] == 0
+    assert client.get("/api/v1/artifacts", params={"run_id": "run_missing"}).json()["total"] == 0
+
+
+def test_artifacts_are_paginated(client, agent, monkeypatch):
+    _produce_artifact(client, agent, monkeypatch)
+
+    page = client.get("/api/v1/artifacts", params={"limit": 1}).json()
+    assert page["total"] == 1
+    assert len(page["items"]) == 1
+    assert page["limit"] == 1
+
+    assert client.get("/api/v1/artifacts", params={"limit": 0}).status_code == 422
+    assert client.get("/api/v1/artifacts", params={"offset": -1}).status_code == 422
+
+
+def test_artifacts_list_is_tenant_isolated(client, agent, monkeypatch, tenant_key):
+    body = _produce_artifact(client, agent, monkeypatch)
+    artifact_id = body["artifacts"][0]["id"]
+
+    client.headers["Authorization"] = f"Bearer {tenant_key('acme')}"
+
+    assert client.get("/api/v1/artifacts").json()["total"] == 0
+    assert client.get(f"/api/v1/artifacts/{artifact_id}/download").status_code == 404
+
+
+def test_artifact_download_uses_attachment_disposition(client, agent, monkeypatch):
+    body = _produce_artifact(client, agent, monkeypatch)
+    artifact_id = body["artifacts"][0]["id"]
+
+    download = client.get(f"/api/v1/artifacts/{artifact_id}/download")
+    assert download.status_code == 200
+    assert download.content == b"hello artifact"
+    assert "attachment" in download.headers["content-disposition"]
+    assert "report.txt" in download.headers["content-disposition"]

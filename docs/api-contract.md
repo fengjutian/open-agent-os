@@ -423,11 +423,16 @@ HTTP 状态码只表示请求本身是否被处理；策略拒绝不是 API 错�
 
 产物接口：
 
-- `GET /tool-invocations/{invocation_id}/artifacts`：分页列出产物索引。
+- `GET /artifacts`：分页列出**本租户**的全部产物索引，可选 `run_id`、`tool_name` 过滤；
+  按生成时间倒序。租户隔离由 ORM 强制过滤（`ToolArtifact` 是 `TenantScoped`），
+  跨租户不可见。返回 `Page[ToolArtifactRead]`，只含索引不含文件内容。
+- `GET /tool-invocations/{invocation_id}/artifacts`：分页列出一次调用的产物索引。
 - `GET /artifacts/{artifact_id}/download`：下载文件，固定 `application/octet-stream`
   + `Content-Disposition: attachment`；文件缺失返回 404 `artifact_not_found`。
 - 只收集 `/workspace/output` 下的普通文件；不跟随符号链接，拒绝 `../` 与绝对路径；
   大小与 SHA-256 以宿主机重新读取为准。
+
+详见 [features/artifact-center.md](features/artifact-center.md)。
 
 > 隔离由 Docker 提供：`--network none`、`--read-only`、`--cap-drop ALL`、
 > `--pids-limit` / `--memory` / `--cpus`、默认非 root（Windows 例外）。

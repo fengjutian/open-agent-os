@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchResponse,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
+import type {Agent,AgentTool,Approval,Artifact,AuditLog,Conversation,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchResponse,Me,Membership,Memory,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -120,7 +120,38 @@ export const api={
  usageOverview:(days=30)=>request<UsageOverview>(`/usage/overview?days=${days}`),
  usageTimeline:(days=30,bucket="day")=>request<UsageBucket[]>(`/usage/timeline?days=${days}&bucket=${bucket}`),
  usageBreakdown:(days=30,dimension="agent")=>request<UsageBreakdown[]>(`/usage/breakdown?days=${days}&dimension=${dimension}`),
+
+ artifacts:(params:{run_id?:string;tool_name?:string;limit?:number}={})=>{
+  const query=new URLSearchParams();
+  if(params.run_id) query.set("run_id",params.run_id);
+  if(params.tool_name) query.set("tool_name",params.tool_name);
+  if(params.limit) query.set("limit",String(params.limit));
+  const suffix=query.toString();
+  return request<Page<Artifact>>(`/artifacts${suffix?`?${suffix}`:""}`);
+ },
 };
+
+/**
+ * 下载产物文件。
+ * 下载接口要带 Authorization 头，所以不能用普通 <a href>——得自己取 blob 再触发保存。
+ */
+export async function downloadArtifact(id:string, filename:string):Promise<void>{
+ const key=keyStore.get();
+ const res=await fetch(`${BASE}/artifacts/${encodeURIComponent(id)}/download`,{
+  headers:{...(key?{Authorization:`Bearer ${key}`}:{})},
+ });
+ if(!res.ok) throw new ApiError(await describeError(res), res.status);
+ const blob=await res.blob();
+ const url=URL.createObjectURL(blob);
+ const link=document.createElement("a");
+ link.href=url;
+ link.download=filename;
+ document.body.appendChild(link);
+ link.click();
+ link.remove();
+ // 立刻 revoke 会让部分浏览器来不及开始下载，延后一点再回收
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 
 /** 流式回调：服务端按 SSE 事件推送。 */
 export interface StreamHandlers {

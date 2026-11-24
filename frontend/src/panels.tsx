@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from "react";
-import {api} from "./api";
-import type {Agent,AgentTool,Approval,AuditLog,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchHit,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
+import {api,downloadArtifact} from "./api";
+import type {Agent,AgentTool,Approval,Artifact,AuditLog,CronJob,KnowledgeBase,KnowledgeDocument,KnowledgeSearchHit,Me,Memory as MemoryRow,Membership,Run,RunEvent,Tenant,Tool,UsageBreakdown,UsageBucket,UsageOverview} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -964,6 +964,104 @@ export function UsagePanel({onError}:{onError:(err:unknown)=>void}) {
             {!breakdown.length && <p className="muted">窗口内没有可分解的记录。</p>}
           </>
           : <p className="muted">{loading ? "加载中…" : "没有用量数据。"}</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+function fileSize(bytes:number):string {
+  if(bytes<1024) return `${bytes} B`;
+  if(bytes<1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/1024/1024).toFixed(1)} MB`;
+}
+
+export function ArtifactPanel({onError}:{onError:(err:unknown)=>void}) {
+  const [items,setItems]=useState<Artifact[]>([]);
+  const [total,setTotal]=useState(0);
+  const [toolName,setToolName]=useState("");
+  const [runId,setRunId]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [copied,setCopied]=useState("");
+
+  const reload=useCallback(async()=>{
+    setBusy(true);
+    try{
+      const page=await api.artifacts({
+        tool_name:toolName.trim()||undefined,
+        run_id:runId.trim()||undefined,
+        limit:100,
+      });
+      setItems(page.items);
+      setTotal(page.total);
+    }catch(err){onError(err);}
+    finally{setLoading(false);setBusy(false);}
+  },[toolName,runId,onError]);
+
+  useEffect(()=>{reload();},[reload]);
+
+  async function download(item:Artifact){
+    try{await downloadArtifact(item.id,item.path.split("/").pop() ?? item.path);}
+    catch(err){onError(err);}
+  }
+
+  /** 复制产物 id：它就是输入挂载参数（file_id）要填的值。 */
+  async function copyId(item:Artifact){
+    try{
+      if(!navigator.clipboard) throw new Error("当前环境不支持剪贴板");
+      await navigator.clipboard.writeText(item.id);
+      setCopied(item.id);
+      setTimeout(()=>setCopied(current=>current===item.id?"":current),1500);
+    }catch(err){onError(err);}
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>筛选</h3>
+      <div className="stack">
+        <label className="muted" htmlFor="artifact-tool">工具名</label>
+        <input id="artifact-tool" className="field" value={toolName}
+          placeholder="留空表示全部" onChange={e=>setToolName(e.target.value)}/>
+        <label className="muted" htmlFor="artifact-run">运行 ID</label>
+        <input id="artifact-run" className="field" value={runId}
+          placeholder="留空表示全部" onChange={e=>setRunId(e.target.value)}/>
+      </div>
+      <p className="muted">
+        产物来自隔离执行器。想把它喂给下一次执行，就复制这里的 id，
+        填进工具声明的输入参数（<code>config.inputs</code> 里的 <code>argument</code>）。
+      </p>
+      <button className="ghost" onClick={reload} disabled={busy}>刷新</button>
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>产物</b><small>共 {total} 个</small></div>
+        <span>● {loading ? "…" : "ok"}</span>
+      </div>
+      <div className="panel-body">
+        <table className="table">
+          <thead><tr>
+            <th>路径</th><th>工具</th><th>大小</th><th>生成时间</th><th>产物 ID</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            {items.map(item=><tr key={item.id}>
+              <td>{item.path}</td>
+              <td className="muted">{item.tool_name}</td>
+              <td className="muted">{fileSize(item.size_bytes)}</td>
+              <td className="muted small">{time(item.created_at)}</td>
+              <td><code className="artifact-id" title={item.id}>{item.id.slice(0,8)}</code></td>
+              <td>
+                <div className="actions">
+                  <button className="ghost" onClick={()=>download(item)}>下载</button>
+                  <button className="ghost" onClick={()=>copyId(item)}>
+                    {copied===item.id ? "已复制" : "复制 ID"}
+                  </button>
+                </div>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!items.length && <p className="muted">{loading ? "加载中…" : "还没有产物。"}</p>}
       </div>
     </section>
   </div>;
