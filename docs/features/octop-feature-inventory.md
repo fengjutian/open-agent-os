@@ -24,7 +24,7 @@
 | 能力 | Octop 位置 | 本项目 |
 |---|---|---|
 | 多轮会话、消息持久化 | `infra/history`（17 文件）、`api/routers/agents` | ✅ |
-| 会话模式 Ask / Plan / Craft | `infra/agents/conversation_mode.py` | ❌ |
+| 会话模式 Ask / Plan / Craft | `infra/agents/conversation_mode.py` | ✅（见 [conversation-modes.md](conversation-modes.md)） |
 | 线程版本化历史、轨迹事件 | `infra/history`（"legacy data is never migrated on read"） | 🟡 只有 `runs` / `run_events` |
 | 线程分叉 fork | `infra/agents/threads/fork.py` | ❌ |
 | 上下文占用分解 | `infra/agents/threads/context_breakdown.py` | 🟡 只有字符预算裁剪 |
@@ -174,7 +174,7 @@
 
 | 状态 | 数量 | 说明 |
 |---|---|---|
-| ✅ 已有 | 12 | 对话、Agent CRUD、工具治理、MCP、运行记录、SSE、认证、多租户、限流、评测、OTel、审计链 |
+| ✅ 已有 | 13 | 对话、会话模式、Agent CRUD、工具治理、MCP、运行记录、SSE、认证、多租户、限流、评测、OTel、审计链 |
 | 🟡 部分 | 13 | 技能、模型、上下文、工作区、用户、运维等 |
 | ❌ 没有 | 60+ | 知识库、记忆、插件生态、团队、HITL、多渠道、cron、多模态、端、i18n… |
 
@@ -182,7 +182,7 @@
 
 **第一层：能对齐，且不依赖外部基础设施**（纯代码 + 已有能力）
 
-- 会话模式 Ask / Plan / Craft
+- 会话模式 Ask / Plan / Craft —— ✅ 已完成（`68287ff`）
 - HITL 人工审批（工具调用挂起 → 人工批准 → 继续）
 - 定时任务 cron（进程内调度）
 - 长期记忆（基于现有 DB 的摘要 + 检索）
@@ -212,7 +212,7 @@
 
 | 批次 | 功能 | 依赖 | 预估 |
 |---|---|---|---|
-| B1 | 会话模式 Ask / Plan / Craft | 无 | 小 |
+| B1 | 会话模式 Ask / Plan / Craft | 无 | 小 · **已完成**（`68287ff`） |
 | B1 | HITL 人工审批（挂起/批准/拒绝 + 前端入口） | 无 | 中 |
 | B1 | 定时任务 cron（模型 + 调度 + API + 前端） | 无 | 中 |
 | B2 | 上下文压缩（摘要替代丢弃） | 模型调用 | 中 |
