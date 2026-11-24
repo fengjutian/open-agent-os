@@ -2,7 +2,7 @@
 
 ## V0.1
 - Agent：id、name、description、system_prompt、model、created_at、updated_at。
-- Conversation：id、agent_id、title、mode（ask/plan/craft）、created_at、updated_at。
+- Conversation：id、agent_id、title、mode（ask/plan/craft）、summary（历史摘要）、summary_message_count（已覆盖条数）、created_at、updated_at。
 - Message：id、conversation_id、role、content、created_at。
 
 关系：Agent 1:N Conversation；Conversation 1:N Message。

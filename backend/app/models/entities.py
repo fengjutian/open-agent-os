@@ -50,6 +50,9 @@ class Conversation(TenantScoped):
     title: Mapped[str] = mapped_column(String(200), default="New conversation")
     # ask / plan / craft：控制该会话里模型能看到哪些工具（见 services/conversation_modes.py）
     mode: Mapped[str] = mapped_column(String(16), default="craft", server_default="craft")
+    # 历史过长时的摘要，以及已经被摘要覆盖的消息条数（避免重复摘要、重复花钱）
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_message_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     agent: Mapped[Agent] = relationship(back_populates="conversations")

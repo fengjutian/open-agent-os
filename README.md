@@ -160,8 +160,16 @@ CI（`.github/workflows/ci.yml`）会跑：Ruff、pytest、前端构建、Rust �
 
 ## 上下文窗口
 
-`CONTEXT_MAX_CHARS`（默认 24000）限制单次请求的上下文预算。超出时从最旧的历史消息开始丢弃，
-最新的用户输入始终保留（过长则截断尾部），并在日志中记录 `context trimmed to budget` 事件。
+`CONTEXT_MAX_CHARS`（默认 24000）限制单次请求的上下文预算。
+
+**历史装不下时会先摘要，而不是直接丢弃。** 触发条件：历史长度超过预算的
+`CONTEXT_SUMMARY_TRIGGER_RATIO`（默认 0.8），且尚未被摘要覆盖的消息达到
+`CONTEXT_SUMMARY_KEEP_MESSAGES`（默认 6）条。摘要写回会话（`summary` +
+`summary_message_count`），下一轮只压缩新增部分，不会重复调用模型。最近 6 条消息
+始终原样保留；摘要失败则退回"整条丢弃"，不影响对话本身。
+
+摘要之后的兜底仍按原逻辑：从最旧的消息开始丢弃，最新的用户输入始终保留
+（过长则截断尾部），并在日志中记录 `context trimmed to budget` 事件。
 
 ## 工具治理（V0.2）
 

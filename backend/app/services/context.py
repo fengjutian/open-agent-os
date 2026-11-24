@@ -35,6 +35,8 @@ def build_messages(
     system_prompt: str,
     history: Sequence[ChatMessage],
     max_chars: int,
+    *,
+    summary: str | None = None,
 ) -> ContextResult:
     """在 max_chars 字符预算内构造 [system, ...history] 消息列表。
 
@@ -43,6 +45,9 @@ def build_messages(
     - 若最新一条本身就超预算，对其内容做尾部截断，保证请求至少带上当前输入。
     """
     max_chars = max(1, max_chars)
+    if summary:
+        # 摘要放在系统提示之后：它代表"更早的对话"，语义上属于背景而不是用户发言
+        system_prompt = f"{system_prompt}\n\n[早前对话摘要]\n{summary}"
     budget = max_chars - len(system_prompt)
 
     if budget <= 0:

@@ -19,7 +19,12 @@ from app.core.tenancy import current_tenant
 from app.models.entities import Agent, Conversation, Message, Run, ToolApproval, now_utc
 from app.schemas.dto import MessageRead
 from app.services.approvals import STATUS_PENDING_APPROVAL, ApprovalRequired
-from app.services.context import ChatMessage, ContextResult, build_messages
+from app.services.context import (
+    _PER_MESSAGE_OVERHEAD,
+    ChatMessage,
+    ContextResult,
+    build_messages,
+)
 from app.services.conversation_modes import filter_tool_specs, mode_hint, normalize_mode
 from app.services.model_gateway import (
     ModelProvider,
@@ -37,6 +42,7 @@ from app.services.runs import (
     finalize_failure,
 )
 from app.services.skills import compose_system_prompt
+from app.services.summarizer import summarize_history
 from app.services.tool_gateway import ToolCallOutcome, ToolGateway
 from app.services.tool_registry import ToolRegistry
 
@@ -114,7 +120,7 @@ class AgentRuntime:
         *,
         mode: str | None = None,
     ) -> tuple[Message, Message]:
-        state = self._start(db, conversation, user_content, mode=mode)
+        state = await self._start(db, conversation, user_content, mode=mode)
         current.set_attribute("agent.id", state.agent.id)
         current.set_attribute("run.id", state.run_id)
         current.set_attribute("model", state.agent.model)
@@ -183,7 +189,7 @@ class AgentRuntime:
         事件：run.started / delta / tool.call / tool.result / completed / error。
         与非流式共用 _start/_finish，保证两条路径的行为不会分叉。
         """
-        state = self._start(db, conversation, user_content, mode=mode)
+        state = await self._start(db, conversation, user_content, mode=mode)
         current.set_attribute("agent.id", state.agent.id)
         current.set_attribute("run.id", state.run_id)
         current.set_attribute("model", state.agent.model)
@@ -296,7 +302,7 @@ class AgentRuntime:
     # 共享的准备与收尾
     # ------------------------------------------------------------------
 
-    def _start(
+    async def _start(
         self,
         db: Session,
         conversation: Conversation,
@@ -359,7 +365,10 @@ class AgentRuntime:
             if m.role in {"user", "assistant"}
         ]
 
-        context = build_messages(system_prompt, history, settings.context_max_chars)
+        summary = await self._ensure_summary(db, conversation, agent, history, system_prompt)
+        context = build_messages(
+            system_prompt, history, settings.context_max_chars, summary=summary
+        )
         if context.dropped_messages or context.truncated_newest:
             log_event(
                 logger,
@@ -603,6 +612,62 @@ class AgentRuntime:
         return self._finish(
             db, state, answer=answer, iterations=iterations, tool_calls=tool_calls
         )
+
+    async def _ensure_summary(
+        self,
+        db: Session,
+        conversation: Conversation,
+        agent: Agent,
+        history: list[ChatMessage],
+        system_prompt: str,
+    ) -> str | None:
+        """历史装不下时，把最老的一段压成摘要。
+
+        三个条件都不满足就直接返回已有摘要（可能是 None，即走原来的整条丢弃）：
+        还没被覆盖的消息够多、总长度确实超过触发线、以及摘要本身没失败。
+        """
+        if not settings.context_summary_enabled or not history:
+            return conversation.summary
+
+        keep = max(0, settings.context_summary_keep_messages)
+        already = conversation.summary_message_count or 0
+        pending_end = len(history) - keep
+        # 还没攒够一批就不摘要：否则每轮都要多调一次模型，得不偿失
+        if pending_end - already < max(1, keep):
+            return conversation.summary
+
+        total = sum(len(message.content) + _PER_MESSAGE_OVERHEAD for message in history)
+        if total + len(system_prompt) <= settings.context_max_chars * settings.context_summary_trigger_ratio:
+            return conversation.summary
+
+        provider = self._provider or get_model_provider()
+        try:
+            summary = await summarize_history(
+                provider,
+                model=agent.model,
+                messages=history[already:pending_end],
+                previous_summary=conversation.summary,
+                max_chars=settings.context_summary_max_chars,
+            )
+        except Exception:  # noqa: BLE001 - 摘要失败必须退回截断，不能拖垮对话
+            logger.warning(
+                "summarize failed, falling back to truncation",
+                exc_info=True,
+                extra={"fields": {"conversation_id": conversation.id}},
+            )
+            return conversation.summary
+
+        conversation.summary = summary
+        conversation.summary_message_count = pending_end
+        db.flush()
+        log_event(
+            logger,
+            "history summarized",
+            conversation_id=conversation.id,
+            summarized_messages=pending_end - already,
+            summary_chars=len(summary),
+        )
+        return summary
 
     def _finish(
         self,

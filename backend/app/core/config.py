@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     mcp_timeout_seconds: float = 30.0
     # MCP 连接空闲多久后回收（秒）；0 表示每次调用都重连
     mcp_idle_seconds: float = 60.0
+    # 历史装不下时用摘要替代"整条丢弃"；只在超过预算的 trigger_ratio 时触发
+    context_summary_enabled: bool = True
+    context_summary_trigger_ratio: float = 0.8
+    context_summary_keep_messages: int = 6
+    context_summary_max_chars: int = 2000
     # 会话模式默认值：ask / plan / craft（见 services/conversation_modes.py）
     default_conversation_mode: str = "craft"
     # 定时任务：是否启动后台调度循环，以及轮询间隔（秒）
