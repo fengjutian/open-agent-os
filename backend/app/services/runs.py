@@ -17,6 +17,8 @@ from app.models.entities import Run, RunEvent, now_utc
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
+# 等待人工审批：检查点已落库，批准后从检查点续跑同一个 run
+STATUS_WAITING_APPROVAL = "waiting_approval"
 
 
 class RunRecorder:
@@ -25,7 +27,10 @@ class RunRecorder:
     def __init__(self, db: Session, run: Run) -> None:
         self._db = db
         self.run = run
-        self._seq = 0
+        # 续跑时要接着已有的 seq 往下写，否则会与历史事件撞号
+        self._seq = (
+            db.scalar(select(func.max(RunEvent.seq)).where(RunEvent.run_id == run.id)) or 0
+        )
 
     def event(self, event_type: str, **payload: Any) -> None:
         self._seq += 1

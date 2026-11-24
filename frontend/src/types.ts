@@ -63,6 +63,12 @@ export interface Membership {
  id:string; subject:string; role:"admin"|"developer"|"viewer"|string; created_at:string;
 }
 
+export interface Approval {
+ id:string; run_id:string; tool_name:string; call_id:string|null;
+ arguments:Record<string,unknown>; status:string; decided_by:string|null;
+ reason:string|null; created_at:string; decided_at:string|null;
+}
+
 export interface CronJob {
  id:string; agent_id:string; conversation_id:string|null; name:string; prompt:string;
  schedule:string; enabled:boolean; next_run_at:string; last_run_at:string|null;

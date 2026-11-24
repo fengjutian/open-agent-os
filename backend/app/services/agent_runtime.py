@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -16,8 +16,9 @@ from app.core.logging import log_event
 from app.core.request_context import principal_key_id_var, run_id_var
 from app.core.telemetry import record_run, span
 from app.core.tenancy import current_tenant
-from app.models.entities import Agent, Conversation, Message, Run, now_utc
+from app.models.entities import Agent, Conversation, Message, Run, ToolApproval, now_utc
 from app.schemas.dto import MessageRead
+from app.services.approvals import STATUS_PENDING_APPROVAL, ApprovalRequired
 from app.services.context import ChatMessage, ContextResult, build_messages
 from app.services.conversation_modes import filter_tool_specs, mode_hint, normalize_mode
 from app.services.model_gateway import (
@@ -29,7 +30,12 @@ from app.services.model_gateway import (
     get_model_provider,
 )
 from app.services.policy import PolicyEngine
-from app.services.runs import STATUS_RUNNING, RunRecorder, finalize_failure
+from app.services.runs import (
+    STATUS_RUNNING,
+    STATUS_WAITING_APPROVAL,
+    RunRecorder,
+    finalize_failure,
+)
 from app.services.skills import compose_system_prompt
 from app.services.tool_gateway import ToolCallOutcome, ToolGateway
 from app.services.tool_registry import ToolRegistry
@@ -59,6 +65,8 @@ class _RunState:
     tool_specs: list[dict[str, Any]]
     tool_names: list[str]
     messages: list[dict[str, Any]]
+    # 从检查点续跑时的起始轮次（新运行为 1）
+    start_iteration: int = 1
 
 
 class AgentRuntime:
@@ -111,61 +119,10 @@ class AgentRuntime:
         current.set_attribute("run.id", state.run_id)
         current.set_attribute("model", state.agent.model)
         try:
-            provider = self._provider or get_model_provider()
-            answer = ""
-            iterations = 0
-            tool_call_count = 0
-
-            for iteration in range(1, max(1, settings.max_tool_iterations) + 1):
-                iterations = iteration
-                state.recorder.event(
-                    "model.request",
-                    iteration=iteration,
-                    message_count=len(state.messages),
-                    tools=state.tool_names,
-                )
-                with span(
-                    "model.request", iteration=iteration, model=state.agent.model
-                ) as model_span:
-                    reply = await provider.generate(
-                        model=state.agent.model,
-                        messages=state.messages,
-                        tools=state.tool_specs or None,
-                    )
-                    model_span.set_attribute("reply.text_chars", len(reply.text))
-                    model_span.set_attribute("reply.tool_calls", len(reply.tool_calls))
-                state.recorder.event(
-                    "model.response",
-                    iteration=iteration,
-                    text_chars=len(reply.text),
-                    tool_calls=[call.name for call in reply.tool_calls],
-                )
-
-                if not reply.tool_calls:
-                    answer = reply.text
-                    break
-
-                state.messages.append(self._assistant_tool_call_message(reply))
-                for call in reply.tool_calls:
-                    tool_call_count += 1
-                    outcome = await self._run_tool(db, state, call, iteration)
-                    state.messages.append(self._tool_result_message(call, outcome))
-            else:
-                log_event(
-                    logger,
-                    "tool loop hit max iterations",
-                    level=logging.WARNING,
-                    max_iterations=settings.max_tool_iterations,
-                )
-                answer = max_iterations_message(max(1, settings.max_tool_iterations))
-
-            return self._finish(
-                db,
-                state,
-                answer=answer,
-                iterations=iterations,
-                tool_calls=tool_call_count,
-            )
+            answer, iterations, tool_call_count = await self._run_loop(db, state)
+        except ApprovalRequired as exc:
+            self._pause_for_approval(db, state, exc)
+            raise
         except AppError as exc:
             self._fail(db, state, exc.code, exc.message)
             raise
@@ -173,6 +130,14 @@ class AgentRuntime:
             logger.exception("agent run crashed", extra={"fields": {"run_id": state.run_id}})
             self._fail(db, state, ErrorCode.INTERNAL_ERROR, type(exc).__name__)
             raise
+
+        return self._finish(
+            db,
+            state,
+            answer=answer,
+            iterations=iterations,
+            tool_calls=tool_call_count,
+        )
 
     # ------------------------------------------------------------------
     # 流式
@@ -309,6 +274,15 @@ class AgentRuntime:
         except AppError as exc:
             self._fail(db, state, exc.code, exc.message)
             yield {"type": "error", "code": exc.code, "message": exc.message}
+        except ApprovalRequired as exc:
+            # 暂停而不是失败：保存检查点，把审批 id 告诉客户端，流到此结束
+            self._pause_for_approval(db, state, exc)
+            yield {
+                "type": "run.waiting_approval",
+                "run_id": state.run_id,
+                "approval_id": exc.approval_id,
+                "tool": exc.tool_name,
+            }
         except GeneratorExit:
             # 客户端中途断开：把运行标记出来，避免永远停留在 running。
             self._fail(db, state, "client_disconnected", "客户端在流式中断开了连接")
@@ -446,6 +420,190 @@ class AgentRuntime:
             messages=messages,
         )
 
+    async def _run_loop(self, db: Session, state: _RunState) -> tuple[str, int, int]:
+        """模型 ⇄ 工具循环。需要审批时抛 ApprovalRequired，由调用方保存现场。"""
+        provider = self._provider or get_model_provider()
+        answer = ""
+        iterations = state.start_iteration
+        tool_call_count = 0
+
+        for offset in range(max(1, settings.max_tool_iterations)):
+            iteration = state.start_iteration + offset
+            iterations = iteration
+            state.recorder.event(
+                "model.request",
+                iteration=iteration,
+                message_count=len(state.messages),
+                tools=state.tool_names,
+            )
+            with span("model.request", iteration=iteration, model=state.agent.model) as model_span:
+                reply = await provider.generate(
+                    model=state.agent.model,
+                    messages=state.messages,
+                    tools=state.tool_specs or None,
+                )
+                model_span.set_attribute("reply.text_chars", len(reply.text))
+                model_span.set_attribute("reply.tool_calls", len(reply.tool_calls))
+            state.recorder.event(
+                "model.response",
+                iteration=iteration,
+                text_chars=len(reply.text),
+                tool_calls=[call.name for call in reply.tool_calls],
+            )
+
+            if not reply.tool_calls:
+                answer = reply.text
+                break
+
+            state.messages.append(self._assistant_tool_call_message(reply))
+            for call in reply.tool_calls:
+                tool_call_count += 1
+                outcome = await self._run_tool(db, state, call, iteration)
+                state.messages.append(self._tool_result_message(call, outcome))
+        else:
+            log_event(
+                logger,
+                "tool loop hit max iterations",
+                level=logging.WARNING,
+                max_iterations=settings.max_tool_iterations,
+            )
+            answer = max_iterations_message(max(1, settings.max_tool_iterations))
+
+        return answer, iterations, tool_call_count
+
+    def _pause_for_approval(self, db: Session, state: _RunState, exc: ApprovalRequired) -> None:
+        """保存现场：检查点进数据库，进程重启后审批依然有效。"""
+        state.run.status = STATUS_WAITING_APPROVAL
+        state.run.checkpoint = state.messages
+        state.run.checkpoint_iteration = exc.iteration
+        state.run.finished_at = None
+        state.recorder.event(
+            "run.waiting_approval",
+            approval_id=exc.approval_id,
+            tool=exc.tool_name,
+            iteration=exc.iteration,
+        )
+        db.commit()
+        log_event(
+            logger,
+            "agent run paused for approval",
+            run_id=state.run_id,
+            tool=exc.tool_name,
+            approval_id=exc.approval_id,
+        )
+
+    def _resume_state(self, db: Session, run: Run) -> _RunState:
+        """从检查点还原运行状态。"""
+        agent = db.get(Agent, run.agent_id) if run.agent_id else None
+        conversation = db.get(Conversation, run.conversation_id) if run.conversation_id else None
+        if agent is None or conversation is None:
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "无法恢复运行：Agent 或会话已不存在",
+                status_code=409,
+            )
+
+        messages = list(run.checkpoint or [])
+        mode = normalize_mode(conversation.mode)
+        tool_specs = filter_tool_specs(
+            self._available_tool_specs(db, agent_id=agent.id),
+            mode=mode,
+            read_only_names=self._read_only_tool_names(db, agent_id=agent.id),
+        )
+        user_message = db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation.id, Message.role == "user")
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        ).first()
+        if user_message is None:
+            raise AppError(ErrorCode.INTERNAL_ERROR, "无法恢复运行：缺少用户消息", status_code=409)
+
+        return _RunState(
+            agent=agent,
+            run=run,
+            recorder=RunRecorder(db, run),
+            user_message=user_message,
+            # SQLite 读回来是 naive，补成 UTC 再做时间比较
+            user_created_at=(
+                user_message.created_at
+                if user_message.created_at.tzinfo
+                else user_message.created_at.replace(tzinfo=UTC)
+            ),
+            run_id=run.id,
+            fallback={},
+            context=ContextResult(
+                messages=[],
+                used_chars=sum(len(str(m.get("content") or "")) for m in messages),
+                dropped_messages=0,
+                truncated_newest=False,
+            ),
+            tool_specs=tool_specs,
+            tool_names=[spec["function"]["name"] for spec in tool_specs],
+            messages=messages,
+            start_iteration=(run.checkpoint_iteration or 0) + 1,
+        )
+
+    async def resume(
+        self,
+        db: Session,
+        run: Run,
+        *,
+        decision: str,
+        actor: str,
+        outcome: ToolCallOutcome | None = None,
+        approved_call_id: str | None = None,
+        reason: str | None = None,
+    ) -> tuple[Message, Message]:
+        """审批结束后续跑同一个 run。
+
+        检查点最后一条是模型的 assistant(tool_calls) 消息；这一批里可能不止一个调用，
+        所以要把**每个**调用都补上工具结果，否则真实模型会拒绝（tool_calls 缺结果）。
+        被批准的那个用传入的 outcome，其余重新走网关（可能再次触发审批）。
+        """
+        state = self._resume_state(db, run)
+        pending = state.messages[-1] if state.messages else {}
+        calls = [
+            ToolCall(
+                id=item["id"],
+                name=item["function"]["name"],
+                arguments=json.loads(item["function"]["arguments"] or "{}"),
+            )
+            for item in pending.get("tool_calls", [])
+        ]
+        if not calls:
+            raise AppError(ErrorCode.INTERNAL_ERROR, "检查点里没有待处理工具调用", status_code=409)
+
+        for call in calls:
+            if outcome is not None and call.id == approved_call_id:
+                resolved = outcome
+            elif decision == "rejected":
+                resolved = ToolCallOutcome(
+                    invocation_id="",
+                    tool_name=call.name,
+                    status="rejected",
+                    allowed=False,
+                    reason="用户拒绝",
+                    error_code="tool_rejected",
+                    error_message=reason or "用户拒绝了该工具调用，请勿重试，直接给出你能给的最佳回答。",
+                )
+            else:
+                resolved = await self._run_tool(db, state, call, state.start_iteration - 1)
+            state.messages.append(self._tool_result_message(call, resolved))
+
+        run.status = STATUS_RUNNING
+        db.flush()
+
+        try:
+            answer, iterations, tool_calls = await self._run_loop(db, state)
+        except ApprovalRequired as exc:
+            self._pause_for_approval(db, state, exc)
+            raise
+
+        return self._finish(
+            db, state, answer=answer, iterations=iterations, tool_calls=tool_calls
+        )
+
     def _finish(
         self,
         db: Session,
@@ -531,6 +689,18 @@ class AgentRuntime:
             status=outcome.status,
             error_code=outcome.error_code,
         )
+        if outcome.status == STATUS_PENDING_APPROVAL:
+            # 不执行、不当作失败：记下调用 id 后交给上层保存检查点并暂停运行
+            approval = db.get(ToolApproval, outcome.approval_id) if outcome.approval_id else None
+            if approval is not None:
+                approval.call_id = call.id
+                db.flush()
+            raise ApprovalRequired(
+                run_id=state.run_id,
+                approval_id=outcome.approval_id or "",
+                tool_name=call.name,
+                iteration=iteration,
+            )
         return outcome
 
     @staticmethod

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.approval_routes import router as approval_router
 from app.api.auth_routes import router as auth_router
 from app.api.cron_routes import router as cron_router
 from app.api.error_handlers import register_exception_handlers
@@ -104,6 +105,7 @@ app.include_router(run_router)
 app.include_router(skill_router)
 app.include_router(tenant_router)
 app.include_router(cron_router)
+app.include_router(approval_router)
 
 
 @app.get("/health")

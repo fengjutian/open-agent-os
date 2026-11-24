@@ -1,4 +1,4 @@
-import type {Agent,AgentTool,AuditLog,Conversation,CronJob,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,Conversation,CronJob,Me,Membership,Message,Page,PolicyRule,Run,RunEvent,SendMessageResponse,Tenant,Tool} from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const KEY_STORAGE = "agentPlatformApiKey";
@@ -88,6 +88,10 @@ export const api={
   request<Membership>(`/memberships/${id}`,{method:"PATCH",body:JSON.stringify({role})}),
  removeMembership:(id:string)=>request<void>(`/memberships/${id}`,{method:"DELETE"}),
 
+ approvals:(status="pending")=>request<Page<Approval>>(`/approvals?status=${status}`),
+ approve:(id:string,reason?:string)=>request<SendMessageResponse | {status:string}>(`/approvals/${id}/approve`,{method:"POST",body:JSON.stringify({reason})}),
+ reject:(id:string,reason?:string)=>request<SendMessageResponse | {status:string}>(`/approvals/${id}/reject`,{method:"POST",body:JSON.stringify({reason})}),
+
  cronJobs:(agentId:string)=>request<Page<CronJob>>(`/agents/${agentId}/cron`),
  createCronJob:(agentId:string,data:{name:string;prompt:string;schedule:string})=>
   request<CronJob>(`/agents/${agentId}/cron`,{method:"POST",body:JSON.stringify(data)}),
@@ -105,6 +109,7 @@ export interface StreamHandlers {
  onToolResult?(tool:string,status:string):void;
  onCompleted?(payload:{run_id:string;user_message:Message;assistant_message:Message}):void;
  onEnd?(status:string,reason?:string):void;
+ onApprovalRequired?(approvalId:string,tool:string):void;
  onError?(code:string,message:string):void;
 }
 
@@ -126,6 +131,7 @@ function handleSseChunk(chunk:string,handlers:StreamHandlers){
  else if(event==="tool.result") handlers.onToolResult?.(String(payload.tool ?? ""),String(payload.status ?? ""));
  else if(event==="completed") handlers.onCompleted?.(payload as never);
  else if(event==="stream.end") handlers.onEnd?.(String(payload.status ?? ""),payload.reason ? String(payload.reason) : undefined);
+ else if(event==="run.waiting_approval") handlers.onApprovalRequired?.(String(payload.approval_id ?? ""),String(payload.tool ?? ""));
  else if(event==="error") handlers.onError?.(String(payload.code ?? "error"),String(payload.message ?? ""));
 }
 

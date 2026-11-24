@@ -75,3 +75,16 @@
 
  .sessions{max-height:26vh}
 }
+
+/* 中性提示条（与错误提示区分开） */
+.notice{
+ position:fixed;bottom:18px;right:18px;max-width:460px;
+ display:flex;gap:10px;align-items:flex-start;
+ background:#17304a;color:#d7e6f7;border:1px solid #2f5a80;
+ padding:12px;border-radius:8px;font-size:12px;line-height:1.5;
+ box-shadow:0 10px 28px rgba(0,0,0,.38);
+}
+
+.notice span{flex:1}
+
+.notice .link{color:#9cc7ee;font-size:14px}

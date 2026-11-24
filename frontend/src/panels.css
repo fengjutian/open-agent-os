@@ -134,3 +134,15 @@
 .mode-switch button:hover{color:#c8d4e6}
 
 .mode-switch button.active{background:#2a3b5c;color:#e8effa}
+
+/* 人工审批卡片 */
+.approval-card{border:1px solid #2a3a55;border-radius:10px;padding:12px;margin-bottom:12px;background:#101a2c}
+
+.approval-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+
+.approval-args{
+ margin:0 0 10px;padding:10px;border-radius:8px;background:#0b1322;
+ color:#a9bcd6;font-size:11px;line-height:1.5;overflow:auto;max-height:180px;
+}
+
+.check{display:flex;align-items:center;gap:6px;font-size:11px;color:#a9bcd6}

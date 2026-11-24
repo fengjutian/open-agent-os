@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState} from "react";
 import {api} from "./api";
-import type {Agent,AgentTool,AuditLog,CronJob,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
+import type {Agent,AgentTool,Approval,AuditLog,CronJob,Me,Membership,Run,RunEvent,Tenant,Tool} from "./types";
 
 const ROLES = ["viewer", "developer", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -47,6 +47,7 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
   const [executionType,setExecutionType]=useState<"builtin"|"executor">("builtin");
   const [runtime,setRuntime]=useState<"shell"|"python">("shell");
   const [image,setImage]=useState("");
+  const [needsApproval,setNeedsApproval]=useState(false);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
 
@@ -86,8 +87,9 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
 
     setBusy(true);
     try {
-      const payload:{name:string;description?:string;input_schema:Record<string,unknown>;execution_type:"builtin"|"executor";config?:Record<string,unknown>} = {
+      const payload:{name:string;description?:string;input_schema:Record<string,unknown>;execution_type:"builtin"|"executor";config?:Record<string,unknown>;requires_approval?:boolean} = {
         name:name.trim(), description:description.trim(), input_schema:parsed, execution_type:executionType,
+        requires_approval: needsApproval,
       };
       if(executionType==="executor") {
         payload.config = {runtime, ...(image.trim() ? {image:image.trim()} : {})};
@@ -144,7 +146,12 @@ export function ToolsPanel({agents,me,onError}:{agents:Agent[];me:Me|null;onErro
                 ? "命令由模型调用时给出，仍需策略放行；服务端要启用 EXECUTOR_ENABLED。"
                 : "内建实现只有 echo 与 current_time；注册其它名字不会获得执行能力。"}
             </small>
-            <button className="primary" type="submit" disabled={busy || !name.trim()}>注册工具</button>
+            <label className="check">
+          <input type="checkbox" checked={needsApproval}
+            onChange={e => setNeedsApproval(e.target.checked)} />
+          执行前需要人工审批
+        </label>
+        <button className="primary" type="submit" disabled={busy || !name.trim()}>注册工具</button>
           </form>
         : <p className="muted">当前角色只读，注册工具需要 admin。</p>}
 
@@ -508,6 +515,62 @@ export function CronPanel({agents,onError}:{agents:Agent[];onError:(err:unknown)
           </tbody>
         </table>
         {!jobs.length && <p className="muted">{loading ? "加载中…" : "还没有定时任务。"}</p>}
+      </div>
+    </section>
+  </div>;
+}
+
+export function ApprovalPanel({onError,onChanged}:{onError:(err:unknown)=>void;onChanged?:()=>void}) {
+  const [items,setItems]=useState<Approval[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+
+  const reload = useCallback(async () => {
+    try { setItems((await api.approvals()).items); }
+    catch(err) { onError(err); }
+    finally { setLoading(false); }
+  },[onError]);
+
+  useEffect(()=>{ reload(); },[reload]);
+
+  async function decide(item:Approval, action:"approve"|"reject"){
+    setBusy(true);
+    try{
+      if(action==="approve") await api.approve(item.id);
+      else await api.reject(item.id,"前端拒绝");
+      await reload();
+      onChanged?.();
+    }catch(err){onError(err);}
+    finally{setBusy(false);}
+  }
+
+  return <div className="layout panel-layout">
+    <section className="sessions">
+      <h3>人工审批</h3>
+      <p className="muted">
+        标记了「需要审批」的工具，在真正执行前会停下来等人确认。
+        批准后工具执行，并从检查点续跑同一次运行；拒绝则把结果告诉模型，让它自行收尾。
+      </p>
+      <button className="ghost" onClick={()=>reload()} disabled={busy}>刷新</button>
+    </section>
+
+    <section className="chat">
+      <div className="chat-head">
+        <div><b>待审批</b><small>{items.length} 条等待处理</small></div>
+      </div>
+      <div className="panel-body">
+        {items.map(item=><div className="approval-card" key={item.id}>
+          <div className="approval-head">
+            <b>{item.tool_name}</b>
+            <small className="muted">{time(item.created_at)}</small>
+          </div>
+          <pre className="approval-args">{JSON.stringify(item.arguments,null,2)}</pre>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={()=>decide(item,"approve")}>批准并执行</button>
+            <button className="ghost" disabled={busy} onClick={()=>decide(item,"reject")}>拒绝</button>
+          </div>
+        </div>)}
+        {!items.length && <p className="muted">{loading ? "加载中…" : "没有待审批的调用。"}</p>}
       </div>
     </section>
   </div>;

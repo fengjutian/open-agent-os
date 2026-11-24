@@ -105,8 +105,41 @@ class ModelProvider(ABC):
         return reply
 
 
+def _tool_directive(messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    """解析 Mock 的显式工具调用指令：`CALL:<name> {json}`。"""
+    if not messages:
+        return None
+    last = messages[-1]
+    if last.get("role") != "user":
+        return None
+
+    text = str(last.get("content") or "").strip()
+    if not text.upper().startswith("CALL:"):
+        return None
+
+    rest = text[5:].strip()
+    name, _, raw = rest.partition(" ")
+    name = name.strip()
+    if not name:
+        return None
+
+    try:
+        arguments = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    return name, arguments
+
+
 class MockProvider(ModelProvider):
-    """确定性 Mock：只产出文本，不发起工具调用。"""
+    """确定性 Mock：默认只产出文本。
+
+    为了让本地演示与 e2e 能走通「模型发起工具调用」的路径，
+    支持一条显式指令：当**最后一条消息是用户消息**且以 `CALL:` 开头时，
+    例如 `CALL:echo {"text":"hi"}`，就产出一个对应的工具调用而不是文本。
+    收到工具结果后（最后一条不是用户消息）恢复成普通文本回复。
+    """
 
     CHUNK_SIZE = 8
 
@@ -128,6 +161,17 @@ class MockProvider(ModelProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        directive = _tool_directive(messages)
+        if directive is not None:
+            name, arguments = directive
+            yield StreamDone(
+                reply=ModelReply(
+                    text="",
+                    tool_calls=(ToolCall(id="call_1", name=name, arguments=arguments),),
+                )
+            )
+            return
+
         text = self._render(model, messages)
         for start in range(0, len(text), self.CHUNK_SIZE):
             yield TextDelta(text=text[start : start + self.CHUNK_SIZE])

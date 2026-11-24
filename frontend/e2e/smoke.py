@@ -7,6 +7,7 @@
 import sys
 from pathlib import Path
 
+import httpx
 from playwright.sync_api import sync_playwright
 
 BASE = "http://localhost:5173"
@@ -96,7 +97,48 @@ def main() -> int:
         page.screenshot(path=str(shots / "08-cron.png"))
         assert page.inner_text("table.table tbody tr >> nth=0").find("0 9 * * *") >= 0
 
-        # ---- 7. 窄屏 / 手机宽度 ----
+        # ---- 7. HITL：需要审批的工具 ----
+        api = httpx.Client(
+            base_url="http://127.0.0.1:8000/api/v1",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            trust_env=False,
+            timeout=20,
+        )
+        agent_id = api.get("/agents").json()["items"][0]["id"]
+        api.post(
+            "/tools",
+            json={
+                "name": "echo",
+                "description": "需要人工审批的回显",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                    "additionalProperties": False,
+                },
+                "requires_approval": True,
+            },
+        )
+        api.post(
+            "/policy-rules",
+            json={"agent_id": agent_id, "tool_name": "echo", "effect": "allow"},
+        )
+
+        page.click(".nav button:has-text('对话')")
+        page.wait_for_timeout(300)
+        page.fill(".composer textarea", 'CALL:echo {"text":"hi"}')
+        page.press(".composer textarea", "Enter")
+        page.wait_for_selector(".approval-card", timeout=25000)
+        print("[ok] 运行已暂停，出现待审批卡片")
+        page.screenshot(path=str(shots / "09-approval.png"))
+
+        page.click("button:has-text('批准并执行')")
+        page.wait_for_timeout(2000)
+        remaining = page.locator(".approval-card").count()
+        print("[ok] 批准后剩余待审批:", remaining)
+        assert remaining == 0
+
+        # ---- 8. 窄屏 / 手机宽度 ----
         page.click(".nav button:has-text('对话')")
         page.set_viewport_size({"width": 900, "height": 820})
         page.wait_for_timeout(500)

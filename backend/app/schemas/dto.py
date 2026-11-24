@@ -160,6 +160,8 @@ class ToolCreate(BaseModel):
     enabled: bool = True
     # 声明该工具没有副作用；ask / plan 模式下只有只读工具对模型可见
     read_only: bool = False
+    # 每次调用前都需要人工审批（HITL）
+    requires_approval: bool = False
 
 
 class ToolUpdate(BaseModel):
@@ -168,6 +170,7 @@ class ToolUpdate(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0, le=60)
     enabled: bool | None = None
     read_only: bool | None = None
+    requires_approval: bool | None = None
 
 
 class ToolRead(BaseModel):
@@ -182,6 +185,7 @@ class ToolRead(BaseModel):
     config: dict[str, Any] | None = None
     enabled: bool
     read_only: bool = False
+    requires_approval: bool = False
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -263,6 +267,36 @@ class ToolInvocationRead(BaseModel):
     error_message: str | None
     started_at: UtcDatetime
     finished_at: UtcDatetime | None
+
+
+class ApprovalPending(BaseModel):
+    """运行停下等待人工审批（HTTP 202）。"""
+
+    run_id: str
+    approval_id: str
+    tool: str
+    status: str = "waiting_approval"
+
+
+class ToolApprovalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    run_id: str
+    invocation_id: str | None = None
+    agent_id: str | None = None
+    conversation_id: str | None = None
+    tool_name: str
+    call_id: str | None = None
+    arguments: dict[str, Any]
+    status: str
+    decided_by: str | None = None
+    reason: str | None = None
+    created_at: UtcDatetime
+    decided_at: UtcDatetime | None = None
+
+
+class ApprovalDecision(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class CronJobCreate(BaseModel):

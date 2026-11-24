@@ -2,7 +2,7 @@ import asyncio
 import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from app.schemas.dto import (
     AgentCreate,
     AgentRead,
     AgentUpdate,
+    ApprovalPending,
     ConversationCreate,
     ConversationRead,
     ConversationUpdate,
@@ -30,6 +31,7 @@ from app.schemas.dto import (
     SendMessageResponse,
 )
 from app.services.agent_runtime import AgentRuntime
+from app.services.approvals import ApprovalRequired
 from app.services.conversation_modes import normalize_mode
 from app.services.rate_limit import enforce_run_quota
 from app.services.run_stream import get_run_hub
@@ -232,12 +234,16 @@ def list_messages(
 
 @router.post(
     "/conversations/{conversation_id}/messages",
-    response_model=SendMessageResponse,
-    responses=_MODEL_ERRORS,
+    response_model=SendMessageResponse | ApprovalPending,
+    responses={
+        **_MODEL_ERRORS,
+        202: {"model": ApprovalPending, "description": "等待人工审批"},
+    },
 )
 async def send_message(
     conversation_id: str,
     payload: MessageCreate,
+    response: Response,
     principal: Principal = Depends(require_permission(WRITE_AGENTS)),
     db: Session = Depends(get_db),
 ):
@@ -250,6 +256,13 @@ async def send_message(
     try:
         user_message, assistant_message = await AgentRuntime().respond(
             db, conversation, payload.content, mode=payload.mode
+        )
+    except ApprovalRequired as exc:
+        # 不是失败：用户消息、待审批记录与检查点都已落库，返回 202 让客户端去审批
+        db.commit()
+        response.status_code = status.HTTP_202_ACCEPTED
+        return ApprovalPending(
+            run_id=exc.run_id, approval_id=exc.approval_id, tool=exc.tool_name
         )
     except AppError:
         db.rollback()

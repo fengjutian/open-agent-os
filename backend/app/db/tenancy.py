@@ -17,7 +17,6 @@ from sqlalchemy import event, literal
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from app.core.tenancy import current_tenant
-from app.models.entities import TenantScoped
 
 INCLUDE_ALL_TENANTS = "include_all_tenants"
 
@@ -28,6 +27,10 @@ def _apply_tenant_scope(execute_state) -> None:  # noqa: ANN001 - SQLAlchemy 事
         return
     if execute_state.execution_options.get(INCLUDE_ALL_TENANTS):
         return
+
+    # 延迟导入：本模块在 app.db.session 末尾被导入，而 entities 又依赖 db.session，
+    # 顶层导入会形成「entities → session → tenancy → entities」的循环。
+    from app.models.entities import TenantScoped
 
     # 两条 SQLAlchemy lambda 的硬约束：
     # 1. 条件里不能调用函数（所以不能写 cls.tenant_id == current_tenant()）；

@@ -1,9 +1,9 @@
 import {useCallback,useEffect,useState} from "react";
 import {ApiError,api,keyStore,resumeRunStream,sendMessageStream} from "./api";
-import {CronPanel,RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
+import {ApprovalPanel,CronPanel,RunsPanel,ToolsPanel,OrganizationPanel} from "./panels";
 import type {Agent,Conversation,Me,Message} from "./types";
 
-type View = "chat" | "tools" | "runs" | "org" | "cron";
+type View = "chat" | "tools" | "runs" | "org" | "cron" | "approvals";
 
 export default function App(){
  const [apiKey,setApiKey]=useState(()=>keyStore.get());
@@ -18,6 +18,7 @@ export default function App(){
  const [input,setInput]=useState("");
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState("");
+ const [notice,setNotice]=useState("");
  // 流式输出的临时状态：完成时会替换为真实消息
  const [pendingText,setPendingText]=useState("");
  const [streamText,setStreamText]=useState("");
@@ -122,6 +123,10 @@ export default function App(){
     onToolCall:tool=>setStreamTools(old=>[...old,tool]),
     onToolResult:(tool,status)=>setStreamTools(old=>[...old,`${tool}:${status}`]),
     onCompleted:applyCompleted,
+    onApprovalRequired:(_approvalId,tool)=>{
+     setNotice(`工具 ${tool} 需要人工审批，已转到「审批」视图`);
+     setView("approvals");
+    },
     onError:(code,message)=>{
      settled=true;
      setError(`${code}: ${message}`);
@@ -199,7 +204,8 @@ export default function App(){
   : view==="tools" ? "工具与策略"
   : view==="runs" ? "运行与审计"
   : view==="org" ? "组织与成员"
-  : "定时任务";
+  : view==="cron" ? "定时任务"
+  : "人工审批";
 
  return <div className="shell">
   <aside className="sidebar">
@@ -211,6 +217,7 @@ export default function App(){
     <button className={view==="runs"?"active":""} onClick={()=>setView("runs")}>运行</button>
     <button className={view==="org"?"active":""} onClick={()=>setView("org")}>组织</button>
           <button className={view==="cron"?"active":""} onClick={()=>setView("cron")}>定时</button>
+          <button className={view==="approvals"?"active":""} onClick={()=>setView("approvals")}>审批</button>
    </nav>
 
    <div className="label">AGENTS <button onClick={addAgent}>＋</button></div>
@@ -237,6 +244,7 @@ export default function App(){
    {view==="runs"&&<RunsPanel agents={agents} onError={handleError}/>}
    {view==="org"&&<OrganizationPanel me={me} onError={handleError}/>}
           {view==="cron"&&<CronPanel agents={agents} onError={handleError}/>}
+          {view==="approvals"&&<ApprovalPanel onError={handleError}/>}
 
    {view==="chat"&&<div className="layout">
     <section className="sessions">
@@ -292,6 +300,11 @@ export default function App(){
    </div>}
   </main>
 
+  {notice&&<div className="notice" role="status">
+   <b>提示</b>
+   <span>{notice}</span>
+   <button className="link" onClick={()=>setNotice("")} aria-label="关闭">×</button>
+  </div>}
   {error&&<div className="error" role="alert">
    <b>操作失败</b>
    <span>{error}</span>

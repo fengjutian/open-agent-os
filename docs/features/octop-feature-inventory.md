@@ -54,7 +54,7 @@
 | MCP 客户端 | `api/routers/internal_mcp`、`infra/connectors` MCP builders | ✅（stdio、连接池） |
 | MCP 服务器管理 / 市场 | `infra/connectors`（45 文件：catalog、credential、oauth） | ❌ 只支持环境变量声明 |
 | 隔离执行器（Docker） | 本项目 `rust-executor`（对标物在 Octop 是 workspace/terminal） | 🟡 另一个会话在做 |
-| HITL 人工审批 | `infra/gateway/hitl`（store / coordinator / format）、`agents/security/hitl_session` | ❌ |
+| HITL 人工审批 | `infra/gateway/hitl`（store / coordinator / format）、`agents/security/hitl_session` | ✅（见 [hitl.md](hitl.md)） |
 | 二进制读取守卫、图片工作区中间件 | `middleware/binary_read_guard.py`、`workspace_image.py` | ❌ |
 
 ## 4. 技能
@@ -106,7 +106,7 @@
 | IM 渠道接入（钉钉扫码绑定等） | `gateway/channels`、`api/routers/channels` | ❌ |
 | 机器人创建器 | `gateway/bot_creators` | ❌ |
 | 斜杠命令 | `gateway/slash`、`api/routers/slash` | ❌ |
-| HITL 审批流 | `gateway/hitl` | ❌ |
+| HITL 审批流 | `gateway/hitl` | ✅（见 [hitl.md](hitl.md)） |
 
 ## 9. 连接器与实例互联
 
@@ -174,16 +174,16 @@
 
 | 状态 | 数量 | 说明 |
 |---|---|---|
-| ✅ 已有 | 14 | 对话、会话模式、Agent CRUD、工具治理、MCP、运行记录、SSE、认证、多租户、限流、评测、OTel、审计链、定时任务 |
+| ✅ 已有 | 15 | 对话、会话模式、Agent CRUD、工具治理、MCP、运行记录、SSE、认证、多租户、限流、评测、OTel、审计链、定时任务 |
 | 🟡 部分 | 13 | 技能、模型、上下文、工作区、用户、运维等 |
-| ❌ 没有 | 60+ | 知识库、记忆、插件生态、团队、HITL、多渠道、cron、多模态、端、i18n… |
+| ❌ 没有 | 58+ | 知识库、记忆、插件生态、团队、多渠道、多模态、端、i18n… |
 
 ## 16. 「功能一样」要分三层看
 
 **第一层：能对齐，且不依赖外部基础设施**（纯代码 + 已有能力）
 
 - 会话模式 Ask / Plan / Craft —— ✅ 已完成（`68287ff`）
-- HITL 人工审批（工具调用挂起 → 人工批准 → 继续）
+- HITL 人工审批（工具调用挂起 → 人工批准 → 继续）—— ✅ 已完成
 - 定时任务 cron（进程内调度）—— ✅ 已完成（见 [cron.md](cron.md)）
 - 长期记忆（基于现有 DB 的摘要 + 检索）
 - 上下文压缩/摘要（替代「整条丢弃」）
@@ -213,7 +213,7 @@
 | 批次 | 功能 | 依赖 | 预估 |
 |---|---|---|---|
 | B1 | 会话模式 Ask / Plan / Craft | 无 | 小 · **已完成**（`68287ff`） |
-| B1 | HITL 人工审批（挂起/批准/拒绝 + 前端入口） | 无 | 中 |
+| B1 | HITL 人工审批（挂起/批准/拒绝 + 前端入口） | 无 | 中 · **已完成** |
 | B1 | 定时任务 cron（模型 + 调度 + API + 前端） | 无 | 中 · **已完成** |
 | B2 | 上下文压缩（摘要替代丢弃） | 模型调用 | 中 |
 | B2 | 长期记忆（摘要 + 检索） | 无 | 中 |

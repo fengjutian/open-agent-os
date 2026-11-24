@@ -41,6 +41,19 @@ Authorization: Bearer oak_xxxxxxxx
 没有成员的 OIDC 用户一律 403。为不存在的租户签发密钥返回 404；
 租户 `status=disabled` 后该租户的所有请求 403。
 
+### 人工审批（HITL）
+
+标了 `requires_approval` 的工具在执行前会停：
+
+- `POST /conversations/{id}/messages` 返回 **202** `{run_id, approval_id, tool, status}`；
+  流式端点则发出 `run.waiting_approval` 事件后结束本次流。
+- `GET /approvals?status=pending`：待审批列表（含工具名与参数）。
+- `POST /approvals/{id}/approve`：执行工具并从检查点续跑同一个 run，
+  返回最终消息；若同批还有工具需要审批，再返回 202。
+- `POST /approvals/{id}/reject`：不执行，把拒绝原因作为工具结果回灌，模型继续收尾。
+
+已处理的审批再次决定返回 **409**；审批结论写入审计（`tool.approval.approved` /
+`tool.approval.rejected`），参数只记键名。
 ### 定时任务
 
 - `POST /agents/{agent_id}/cron`：创建，body `{ name, prompt, schedule, conversation_id?, enabled? }`。

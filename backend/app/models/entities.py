@@ -87,6 +87,32 @@ class CronJob(TenantScoped):
     )
 
 
+class ToolApproval(TenantScoped):
+    """待人工审批的工具调用（HITL）。
+
+    记录模型想调用的工具与参数；批准后由审批端点执行并续跑原运行，
+    拒绝则把「被拒绝」作为工具结果回灌给模型，让它自行收尾。
+    """
+
+    __tablename__ = "tool_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    run_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    invocation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # 模型这一批 tool_calls 里对应的调用 id，续跑时靠它精确匹配
+    call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    # pending / approved / rejected
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    decided_by: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Message(TenantScoped):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -118,6 +144,10 @@ class Run(TenantScoped):
     answer_chars: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 等待人工审批时的检查点：模型消息列表 + 轮次。
+    # 审批通过后从这里续跑同一个 run，而不是另起一次运行。
+    checkpoint: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    checkpoint_iteration: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -243,6 +273,8 @@ class ToolDefinition(TenantScoped):
     # 由人显式声明该工具没有副作用。ask / plan 模式下只有 read_only 工具可见
     # （内建只读工具另见 services/conversation_modes.py 的白名单）。
     read_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # 该工具每次执行前都需要人工审批（HITL）。运行会在调用前暂停并落检查点。
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
